@@ -1,0 +1,11 @@
+# Test: workflow using a nested composite (depth 2 recursion)
+name: nested-composite-test
+on:
+  push:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: nodeselector/actions-test-fixtures/nested-composite@main
+      - run: echo "done"

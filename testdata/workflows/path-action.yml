@@ -1,0 +1,13 @@
+# Test: workflow with path-based action reference
+name: cache-test
+on:
+  push:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache/restore@v4
+      - run: make build
+      - uses: actions/cache/save@v4
