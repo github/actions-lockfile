@@ -1,0 +1,13 @@
+# Test: workflow with mixed action types (some should be ignored by lockfile)
+name: mixed-uses
+on:
+  push:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./local-action
+      - uses: docker://alpine:3.19
+      - uses: actions/setup-node@v4
