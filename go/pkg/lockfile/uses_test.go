@@ -43,6 +43,17 @@ func TestParseActionRef(t *testing.T) {
 		{name: "path single dot segment", input: "owner/repo/./foo@v1", wantNil: true},
 		{name: "path empty segment double slash", input: "owner/repo/a//b@v1", wantNil: true},
 		{name: "ref containing @", input: "foo/bar@a@b", wantNWO: "foo/bar", wantRef: "a@b"},
+		{name: "dotdot owner segment", input: "../repo@v1", wantNil: true},
+		{name: "dotdot repo segment", input: "foo/..@v1", wantNil: true},
+		{name: "dot repo segment", input: "foo/.@v1", wantNil: true},
+		{name: "dot owner segment", input: "./repo@v1", wantNil: true},
+		{name: "ref with double quote", input: `a/b@v1"inj`, wantNil: true},
+		{name: "ref with space", input: "a/b@v1 space", wantNil: true},
+		{name: "ref with single quote", input: "a/b@v1'inj", wantNil: true},
+		{name: "ref with backtick", input: "a/b@v1`inj", wantNil: true},
+		{name: "ref with backslash", input: `a/b@v1\inj`, wantNil: true},
+		{name: "ref with dotdot traversal", input: "a/b@heads/../../x", wantNil: true},
+		{name: "ref with consecutive dots", input: "a/b@v1..v2", wantNil: true},
 	}
 
 	for _, tt := range tests {

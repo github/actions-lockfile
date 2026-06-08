@@ -134,6 +134,6 @@ dependencies:
 `
 	f, err := Parse([]byte(yaml))
 	require.NoError(t, err)
-	assert.Len(t, f.Actions, 1)
+	assert.Len(t, f.Dependencies, 1)
 	assert.Contains(t, f.Workflows, ".github/workflows/ci.yml")
 }
