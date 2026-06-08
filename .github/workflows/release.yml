@@ -1,0 +1,47 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump for the Go module (go/vX.Y.Z tag)
+        type: choice
+        required: true
+        default: patch
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Cut go/ release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Guard release branch
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Releases must be cut from main (got $GITHUB_REF)."
+          exit 1
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.19'
+          cache-dependency-path: go/go.sum
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: script/release "${{ inputs.bump }}"

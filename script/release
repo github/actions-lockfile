@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+#
+# Cut a release of the Go sub-module by creating a path-prefixed tag
+# (go/vX.Y.Z) and a matching GitHub Release.
+#
+# Usage:
+#   script/release <patch|minor|major>
+#
+# The next version is computed from the latest go/vX.Y.Z tag and the chosen
+# bump. This script is the single source of truth for the release procedure:
+# CI invokes it from .github/workflows/release.yml, and a maintainer can run
+# it locally (set RELEASE_DRY_RUN=1 to preview without tagging or pushing).
+#
+# Environment:
+#   RELEASE_DRY_RUN=1   Compute and print the next version, then stop before
+#                       mutating anything (no tag, no push, no release).
+#
+# Requires: git, go, make, gh (authenticated, for the non-dry-run path).
+
+set -euo pipefail
+
+MODULE_PATH="github.com/github/actions-lockfile/go"
+TAG_PREFIX="go/v"
+
+die() {
+  echo "error: $*" >&2
+  exit 1
+}
+
+bump="${1:-}"
+case "$bump" in
+  patch | minor | major) ;;
+  *) die "usage: script/release <patch|minor|major>" ;;
+esac
+
+# Run from the repository root regardless of the caller's cwd.
+cd "$(dirname "$0")/.."
+
+# 1. The release commit must already contain generated output. Regenerate and
+#    fail if anything under go/ drifts — we tag HEAD, not the working tree, so
+#    a dirty tree means the tag would ship stale generated code.
+make generate
+if [ -n "$(git status --porcelain -- go/)" ]; then
+  echo "go/ tree is dirty after 'make generate':" >&2
+  git --no-pager status --porcelain -- go/ >&2
+  die "commit regenerated output before releasing"
+fi
+
+# 2. Gate on a green build at the exact commit being tagged.
+make lint
+make test
+
+# 3. Confirm the module path matches what consumers import.
+actual_module="$(cd go && go list -m)"
+[ "$actual_module" = "$MODULE_PATH" ] ||
+  die "module path is '$actual_module', expected '$MODULE_PATH'"
+
+# 4. Find the latest plain release tag (ignore prereleases like go/v1.2.0-rc.1).
+latest=""
+while IFS= read -r t; do
+  [ -n "$t" ] || continue
+  if printf '%s' "${t#"$TAG_PREFIX"}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+    latest="$t"
+    break
+  fi
+done < <(git tag --list "${TAG_PREFIX}*" --sort=-v:refname)
+
+if [ -z "$latest" ]; then
+  base="0.0.0"
+  echo "No existing ${TAG_PREFIX}* release tag; basing bump on v0.0.0."
+else
+  base="${latest#"$TAG_PREFIX"}"
+fi
+
+major="${base%%.*}"
+rest="${base#*.}"
+minor="${rest%%.*}"
+patch="${rest#*.}"
+
+case "$bump" in
+  major) major=$((major + 1)); minor=0; patch=0 ;;
+  minor) minor=$((minor + 1)); patch=0 ;;
+  patch) patch=$((patch + 1)) ;;
+esac
+
+# 5. Go requires a /vN suffix on the module path for major versions >= 2.
+#    Until the module path carries that suffix, refuse to mint such a tag.
+if [ "$major" -ge 2 ]; then
+  die "v${major}.x requires the module path to end in /v${major} (it is '$MODULE_PATH'); update go.mod and this script before a major bump"
+fi
+
+version="v${major}.${minor}.${patch}"
+tag="${TAG_PREFIX}${major}.${minor}.${patch}"
+
+git rev-parse -q --verify "refs/tags/${tag}" >/dev/null &&
+  die "tag ${tag} already exists"
+
+echo "Releasing ${tag} (module version ${version}) at $(git rev-parse --short HEAD)"
+
+if [ "${RELEASE_DRY_RUN:-}" = "1" ]; then
+  echo "RELEASE_DRY_RUN=1 set; stopping before tag/push/release."
+  exit 0
+fi
+
+# 6. Tag HEAD and push. Use -c so we don't mutate the caller's git identity.
+git \
+  -c user.name="github-actions[bot]" \
+  -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+  tag -a "$tag" -m "$tag"
+git push origin "refs/tags/${tag}"
+
+# 7. Cut the GitHub Release from the tag we just pushed.
+gh release create "$tag" --title "$tag" --verify-tag --generate-notes
+
+# 8. Best-effort: prime the Go module proxy so `go get ...@${version}` resolves
+#    immediately instead of on first external fetch.
+curl -fsSL "https://proxy.golang.org/${MODULE_PATH}/@v/${version}.info" >/dev/null ||
+  echo "warning: proxy warm failed (non-fatal); the proxy will fetch on first use." >&2
+
+echo "Released ${tag}."
