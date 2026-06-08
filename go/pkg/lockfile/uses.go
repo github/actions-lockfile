@@ -70,7 +70,7 @@ func ParseActionRef(uses string) *ActionRef {
 	if len(segments) < 2 || segments[0] == "" || segments[1] == "" {
 		return nil
 	}
-	if !isValidOwnerOrRepo(segments[0]) || !isValidOwnerOrRepo(segments[1]) {
+	if !isValidSegment(segments[0]) || !isValidSegment(segments[1]) {
 		return nil
 	}
 
@@ -81,6 +81,9 @@ func ParseActionRef(uses string) *ActionRef {
 		Raw:   uses,
 	}
 	if len(segments) == 3 {
+		if !isValidPath(segments[2]) {
+			return nil
+		}
 		actionRef.Path = segments[2]
 	}
 
@@ -91,11 +94,11 @@ func ParseActionRef(uses string) *ActionRef {
 	return actionRef
 }
 
-// isValidOwnerOrRepo enforces the GitHub owner/repo character set. GitHub
-// allows alphanumerics, hyphens, underscores, and periods; reject anything
-// else to keep these values safe for use in URL paths and GraphQL string
-// literals without per-call escaping bugs.
-func isValidOwnerOrRepo(s string) bool {
+// isValidSegment enforces the GitHub character set for owner names, repository
+// names, and action path segments. GitHub allows alphanumerics, hyphens,
+// underscores, and periods; reject anything else to keep these values safe for
+// use in URL paths and GraphQL string literals without per-call escaping bugs.
+func isValidSegment(s string) bool {
 	if s == "" {
 		return false
 	}
@@ -123,6 +126,26 @@ func containsControlChars(s string) bool {
 
 func isYAMLFile(path string) bool {
 	return strings.HasSuffix(path, ".yml") || strings.HasSuffix(path, ".yaml")
+}
+
+// isValidPath validates the subdirectory path segment of a uses: reference.
+// Each segment must be non-empty, not "." or "..", and contain only the
+// characters valid in GitHub repository paths (alphanumerics, hyphens,
+// underscores, and periods). This extends the security boundary from
+// owner/repo into the path component.
+func isValidPath(p string) bool {
+	if p == "" {
+		return false
+	}
+	for _, seg := range strings.Split(p, "/") {
+		if seg == "." || seg == ".." {
+			return false
+		}
+		if !isValidSegment(seg) {
+			return false
+		}
+	}
+	return true
 }
 
 // isReusableWorkflow reports whether a parsed ActionRef points at a

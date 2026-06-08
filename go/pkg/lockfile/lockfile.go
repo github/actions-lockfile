@@ -236,8 +236,11 @@ type Action struct {
 }
 
 // Parse unmarshals YAML lockfile contents and verifies the version is
-// supported. It does not validate the actions or workflows sections — that
-// belongs to the consumer (e.g. gh-actions-pin's check command).
+// supported. It enforces structural validity — unknown top-level keys are
+// rejected and required fields must be present — but does not validate pin
+// integrity (e.g. whether a SHA actually matches the ref) or action
+// existence. That belongs to the consumer (e.g. gh-actions-pin's check
+// command).
 //
 // Action map keys and workflow dependency entries are canonicalized via
 // ParsePin so downstream lookups by canonical key (e.g. pin.String()) match

@@ -29,7 +29,7 @@
     "pin": {
       "description": "Canonical dependency pin: OWNER/REPO@REF:ALGO-HEX (e.g. actions/checkout@v4:sha1-34e1...).",
       "type": "string",
-      "pattern": "^[^/@:]+/[^/@:]+@[^:]+:(sha1|sha256)-[0-9a-f]+$"
+      "pattern": "^[^/@:]+/[^/@:]+@[^:]+:(sha1-[0-9a-f]{40}|sha256-[0-9a-f]{64})$"
     },
     "action": {
       "description": "Resolved metadata for a single pinned action.",
