@@ -46,6 +46,50 @@ func (a ActionRef) FullName() string {
 // The returned pointer is non-nil iff the input names a real repository
 // action (composite or javascript) at owner/repo[/path]@ref.
 func ParseActionRef(uses string) *ActionRef {
+	parsed := splitUsesRef(uses)
+	if parsed == nil {
+		return nil
+	}
+	// Reject anything that lives under .github/workflows/ as a YAML file —
+	// directly or nested. Nothing valid as a repository action lives there;
+	// the direct-child form is a reusable workflow (use
+	// ParseReusableWorkflowRef), and a nested form is malformed either way.
+	if isWorkflowFile(parsed.Path) {
+		return nil
+	}
+	return &ActionRef{
+		Owner: parsed.Owner,
+		Repo:  parsed.Repo,
+		Path:  parsed.Path,
+		Ref:   parsed.Ref,
+		Raw:   parsed.Raw,
+	}
+}
+
+// usesRef is the unexported carrier for the components splitUsesRef extracts
+// before classification. It deliberately is NOT ActionRef: a freshly split ref
+// may turn out to be a reusable workflow, so handing back an ActionRef (whose
+// contract is "a repository action") would be a lie until the caller has run
+// the workflow-file check.
+type usesRef struct {
+	Owner string
+	Repo  string
+	Path  string
+	Ref   string
+	Raw   string
+}
+
+// splitUsesRef performs the parse shared by ParseActionRef and
+// ParseReusableWorkflowRef: prefilter the input, split at the FIRST `@`
+// (so a ref that itself contains `@` — e.g. a branch named "release@2024"
+// in owner/repo/.github/workflows/ci.yml@release@2024 — keeps the whole
+// "release@2024" as the ref), then validate the ref and the
+// owner/repo[/path] segments against the security boundary.
+//
+// It returns the parsed components, or nil if the input is not a valid
+// owner/repo[/path]@ref shape. It does NOT classify the result as action vs
+// reusable workflow; that is left to the caller.
+func splitUsesRef(uses string) *usesRef {
 	uses = strings.TrimSpace(uses)
 
 	if uses == "" || containsControlChars(uses) {
@@ -78,7 +122,7 @@ func ParseActionRef(uses string) *ActionRef {
 		return nil
 	}
 
-	actionRef := &ActionRef{
+	parsed := &usesRef{
 		Owner: segments[0],
 		Repo:  segments[1],
 		Ref:   ref,
@@ -88,14 +132,79 @@ func ParseActionRef(uses string) *ActionRef {
 		if !isValidPath(segments[2]) {
 			return nil
 		}
-		actionRef.Path = segments[2]
+		parsed.Path = segments[2]
 	}
 
-	if isReusableWorkflow(actionRef) {
+	return parsed
+}
+
+// ReusableWorkflowRef is a parsed `uses:` reference to a reusable workflow
+// file — the owner/repo/.github/workflows/<name>.yml@ref shape that
+// ParseActionRef deliberately rejects. It carries the same components as
+// ActionRef; Path is the in-repo workflow file path (e.g.
+// ".github/workflows/release.yml"), and Ref is the full ref as written
+// after the FIRST `@`, so a ref containing `@` survives intact.
+//
+// ParseReusableWorkflowRef is the only constructor; treat zero values as
+// invalid.
+type ReusableWorkflowRef struct {
+	Owner string // e.g. "octo"
+	Repo  string // e.g. "workflows"
+	Path  string // e.g. ".github/workflows/release.yml"
+	Ref   string // tag, branch, or full SHA as written after `@`
+	Raw   string // original `uses:` string (post-trim)
+}
+
+// NWO returns owner/repo (Name With Owner). Zero-value refs return the
+// empty string.
+func (r ReusableWorkflowRef) NWO() string {
+	if r.Owner == "" && r.Repo == "" {
+		return ""
+	}
+	return r.Owner + "/" + r.Repo
+}
+
+// FullName returns owner/repo/path — the fully-qualified reusable workflow
+// identity.
+func (r ReusableWorkflowRef) FullName() string {
+	return r.Owner + "/" + r.Repo + "/" + r.Path
+}
+
+// ParseReusableWorkflowRef parses the *remote* reusable-workflow `uses:` shape
+// that ParseActionRef rejects: owner/repo/.github/workflows/<name>.yml@ref. It
+// returns nil for anything that is not a remote reusable workflow — repository
+// actions, expression refs, docker images, or any input whose components are
+// unsafe for the downstream URL/GraphQL builders.
+//
+// It deliberately rejects LOCAL reusable workflows (./.github/workflows/...);
+// those have no owner/repo and a different resolution path. Use
+// IsLocalReusableWorkflow for that shape. It also rejects nested paths such as
+// .github/workflows/sub/ci.yml: GitHub reusable workflows live directly under
+// .github/workflows/, so only a single file segment is accepted.
+//
+// It is the mirror of ParseActionRef for the reusable shape, and shares the
+// same first-`@` split and security validation. Downstream consumers that
+// must derive a reusable workflow's repository and file path (e.g. to locate
+// that repo's detached lockfile) should use this rather than hand-rolling the
+// split: a naive last-`@` split mis-parses refs that contain `@`.
+//
+// The returned pointer is non-nil iff the input names a reusable workflow
+// file at owner/repo/.github/workflows/<name>.{yml,yaml}@ref.
+func ParseReusableWorkflowRef(uses string) *ReusableWorkflowRef {
+	parsed := splitUsesRef(uses)
+	if parsed == nil {
 		return nil
 	}
-
-	return actionRef
+	if !isReusableWorkflow(parsed.Path) {
+		return nil
+	}
+	return &ReusableWorkflowRef{
+		Owner: parsed.Owner,
+		Repo:  parsed.Repo,
+		Path:  parsed.Path,
+		Ref:   parsed.Ref,
+		Raw:   parsed.Raw,
+	}
 }
 
 // isValidSegment enforces the GitHub character set for owner names, repository
@@ -172,21 +281,41 @@ func isValidPath(p string) bool {
 	return true
 }
 
-// isReusableWorkflow reports whether a parsed ActionRef points at a
-// reusable workflow file rather than a repository action. Reusable
-// workflows are keyed by `<owner>/<repo>/.github/workflows/<name>.yml`.
+// isWorkflowFile reports whether a uses: path points at a YAML file anywhere
+// under .github/workflows/ (directly or nested). ParseActionRef uses it to
+// reject such paths wholesale: a repository action never lives there. The
+// direct-child form is a reusable workflow; a nested form is malformed. This
+// is intentionally broader than isReusableWorkflow.
 //
-// Anchor on prefix: substring matching would misclassify composite
-// actions whose nested folder happens to contain that segment (e.g.
-// `tools/.github/workflows/`).
-func isReusableWorkflow(actionRef *ActionRef) bool {
-	if actionRef.Path == "" {
+// Anchor on prefix: substring matching would misclassify composite actions
+// whose nested folder happens to contain that segment (e.g.
+// tools/.github/workflows/).
+func isWorkflowFile(path string) bool {
+	if path == "" {
 		return false
 	}
-	if !strings.HasPrefix(actionRef.Path, ".github/workflows/") {
+	if !strings.HasPrefix(path, ".github/workflows/") {
 		return false
 	}
-	return isYAMLFile(actionRef.Path)
+	return isYAMLFile(path)
+}
+
+// isReusableWorkflow reports whether a uses: path names a reusable workflow
+// file: a single YAML file directly under .github/workflows/. GitHub reusable
+// workflows live there and nowhere deeper, so a nested path like
+// .github/workflows/sub/ci.yml is NOT a reusable workflow. This is the strict
+// classifier ParseReusableWorkflowRef accepts; ParseActionRef rejects the
+// broader isWorkflowFile set, so the two parsers never both accept an input.
+func isReusableWorkflow(path string) bool {
+	const prefix = ".github/workflows/"
+	if !strings.HasPrefix(path, prefix) {
+		return false
+	}
+	name := path[len(prefix):]
+	if name == "" || strings.Contains(name, "/") {
+		return false
+	}
+	return isYAMLFile(name)
 }
 
 // IsLocalReusableWorkflow reports whether a `./...`-prefixed local

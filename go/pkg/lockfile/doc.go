@@ -8,6 +8,10 @@
 // images, local paths, reusable workflows, control characters — returns nil,
 // before it can reach a URL or GraphQL builder.
 //
+// ParseReusableWorkflowRef is its mirror: the reusable-workflow shape
+// ParseActionRef rejects, parsed through the same validation. Both split the
+// ref at the first @, never the last — a ref may legitimately contain one.
+//
 // owner/repo/path pass isValidSegment: a fixed character set, ".."/"." barred.
 // Drop-in safe. The ref is looser by necessity — git refs carry slashes, dots,
 // even another @ — so isValidRef only guarantees it cannot escape a quoted

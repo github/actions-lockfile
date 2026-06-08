@@ -81,21 +81,108 @@ func TestActionRefFullName(t *testing.T) {
 	assert.Equal(t, "actions/cache/save", ActionRef{Owner: "actions", Repo: "cache", Path: "save"}.FullName())
 }
 
-func TestIsReusableWorkflow(t *testing.T) {
+func TestParseReusableWorkflowRef(t *testing.T) {
 	tests := []struct {
-		name string
-		ref  ActionRef
-		want bool
+		name     string
+		input    string
+		wantNil  bool
+		wantNWO  string
+		wantPath string
+		wantRef  string
 	}{
-		{name: "reusable workflow yml", ref: ActionRef{Owner: "owner", Repo: "repo", Path: ".github/workflows/called.yml", Ref: "v1"}, want: true},
-		{name: "reusable workflow yaml", ref: ActionRef{Owner: "owner", Repo: "repo", Path: ".github/workflows/called.yaml", Ref: "main"}, want: true},
-		{name: "regular path action", ref: ActionRef{Owner: "actions", Repo: "cache", Path: "save", Ref: "v4"}, want: false},
-		{name: "no path", ref: ActionRef{Owner: "actions", Repo: "checkout", Ref: "v4"}, want: false},
+		{name: "simple reusable yml", input: "octo/repo/.github/workflows/ci.yml@v1", wantNWO: "octo/repo", wantPath: ".github/workflows/ci.yml", wantRef: "v1"},
+		{name: "reusable yaml extension", input: "octo/repo/.github/workflows/ci.yaml@main", wantNWO: "octo/repo", wantPath: ".github/workflows/ci.yaml", wantRef: "main"},
+		{name: "reusable pinned to sha", input: "octo/repo/.github/workflows/ci.yml@11bd71901bbe5b1630ceea73d27597364c9af683", wantNWO: "octo/repo", wantPath: ".github/workflows/ci.yml", wantRef: "11bd71901bbe5b1630ceea73d27597364c9af683"},
+		// The bug this helper exists to prevent: a ref that itself contains
+		// `@`. A naive last-`@` split would mis-derive the path; the first-`@`
+		// split keeps the whole ref intact.
+		{name: "ref containing at sign", input: "octo/repo/.github/workflows/ci.yml@release@2024", wantNWO: "octo/repo", wantPath: ".github/workflows/ci.yml", wantRef: "release@2024"},
+		{name: "ref containing slash", input: "octo/repo/.github/workflows/ci.yml@feature/foo", wantNWO: "octo/repo", wantPath: ".github/workflows/ci.yml", wantRef: "feature/foo"},
+		// Non-reusable shapes return nil.
+		{name: "repository action is not reusable", input: "actions/checkout@v4", wantNil: true},
+		{name: "path action is not reusable", input: "actions/cache/save@v4", wantNil: true},
+		{name: "non-yaml file in workflows dir", input: "octo/repo/.github/workflows/ci.txt@v1", wantNil: true},
+		{name: "nested workflows path not at prefix", input: "octo/repo/tools/.github/workflows/ci.yml@v1", wantNil: true},
+		{name: "nested under workflows dir", input: "octo/repo/.github/workflows/sub/ci.yml@v1", wantNil: true},
+		{name: "no path", input: "octo/repo@v1", wantNil: true},
+		// Security boundary still applies.
+		{name: "local reusable workflow", input: "./.github/workflows/ci.yml@v1", wantNil: true},
+		{name: "expression ref", input: "${{ matrix.wf }}@v1", wantNil: true},
+		{name: "ref injection double quote", input: `octo/repo/.github/workflows/ci.yml@v1"inj`, wantNil: true},
+		{name: "ref injection space", input: "octo/repo/.github/workflows/ci.yml@v1 x", wantNil: true},
+		{name: "path traversal in workflow path", input: "octo/repo/.github/workflows/../../x.yml@v1", wantNil: true},
+		{name: "empty ref", input: "octo/repo/.github/workflows/ci.yml@", wantNil: true},
+		{name: "control char in path", input: "octo/repo/.github/workflows/ci\t.yml@v1", wantNil: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, isReusableWorkflow(&tt.ref))
+			got := ParseReusableWorkflowRef(tt.input)
+			if tt.wantNil {
+				require.Nil(t, got)
+				return
+			}
+			require.NotNil(t, got)
+			assert.Equal(t, tt.wantNWO, got.NWO())
+			assert.Equal(t, tt.wantPath, got.Path)
+			assert.Equal(t, tt.wantRef, got.Ref)
+		})
+	}
+}
+
+func TestReusableWorkflowRefNames(t *testing.T) {
+	r := ReusableWorkflowRef{Owner: "octo", Repo: "repo", Path: ".github/workflows/ci.yml", Ref: "v1"}
+	assert.Equal(t, "octo/repo", r.NWO())
+	assert.Equal(t, "octo/repo/.github/workflows/ci.yml", r.FullName())
+	assert.Equal(t, "", ReusableWorkflowRef{}.NWO())
+}
+
+func TestIsReusableWorkflow(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{name: "reusable workflow yml", path: ".github/workflows/called.yml", want: true},
+		{name: "reusable workflow yaml", path: ".github/workflows/called.yaml", want: true},
+		{name: "regular path action", path: "save", want: false},
+		{name: "no path", path: "", want: false},
+		{name: "nested under workflows dir", path: ".github/workflows/sub/called.yml", want: false},
+		{name: "non-yaml under workflows dir", path: ".github/workflows/called.txt", want: false},
+		{name: "workflows dir prefix only", path: ".github/workflows/", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isReusableWorkflow(tt.path))
+		})
+	}
+}
+
+// TestActionAndReusableParsersAreMutuallyExclusive locks in the security
+// invariant: no single uses: string is accepted by both ParseActionRef and
+// ParseReusableWorkflowRef.
+func TestActionAndReusableParsersAreMutuallyExclusive(t *testing.T) {
+	inputs := []string{
+		"actions/checkout@v4",
+		"actions/cache/save@v4",
+		"octo/repo/.github/workflows/ci.yml@v1",
+		"octo/repo/.github/workflows/ci.yaml@main",
+		"octo/repo/.github/workflows/ci.yml@release@2024",
+		"octo/repo/.github/workflows/sub/ci.yml@v1",
+		"octo/repo/.github/workflows/ci.txt@v1",
+		"./local@v1",
+		"docker://alpine:3.18",
+		"${{ matrix.x }}@v1",
+		"owner/repo/tools/.github/workflows/x.yml@v1",
+	}
+	for _, in := range inputs {
+		t.Run(in, func(t *testing.T) {
+			a := ParseActionRef(in)
+			r := ParseReusableWorkflowRef(in)
+			if a != nil && r != nil {
+				t.Fatalf("both parsers accepted %q (action=%+v reusable=%+v)", in, a, r)
+			}
 		})
 	}
 }
