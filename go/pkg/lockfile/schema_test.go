@@ -117,6 +117,78 @@ dependencies:
 	assert.Greater(t, pe.Column, 0, "expected a column anchored on the pin key")
 }
 
+func TestParse_EmptyBranchRejected(t *testing.T) {
+	yaml := `version: v0.0.1
+dependencies:
+  actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5:
+    branch: ""
+    commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
+    owner_id: 1
+    repo_id: 2
+`
+	_, err := Parse([]byte(yaml))
+	require.Error(t, err)
+
+	var pe *ParseError
+	require.True(t, errors.As(err, &pe), "expected a *ParseError, got %T", err)
+	assert.Contains(t, pe.Msg, `"branch"`)
+	assert.Contains(t, pe.Msg, "must not be empty")
+}
+
+func TestParse_ZeroOwnerIDRejected(t *testing.T) {
+	yaml := `version: v0.0.1
+dependencies:
+  actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5:
+    branch: main
+    commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
+    owner_id: 0
+    repo_id: 2
+`
+	_, err := Parse([]byte(yaml))
+	require.Error(t, err)
+
+	var pe *ParseError
+	require.True(t, errors.As(err, &pe), "expected a *ParseError, got %T", err)
+	assert.Contains(t, pe.Msg, `"owner_id"`)
+	assert.Contains(t, pe.Msg, "must be a positive integer")
+}
+
+func TestParse_ZeroRepoIDRejected(t *testing.T) {
+	yaml := `version: v0.0.1
+dependencies:
+  actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5:
+    branch: main
+    commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
+    owner_id: 1
+    repo_id: 0
+`
+	_, err := Parse([]byte(yaml))
+	require.Error(t, err)
+
+	var pe *ParseError
+	require.True(t, errors.As(err, &pe), "expected a *ParseError, got %T", err)
+	assert.Contains(t, pe.Msg, `"repo_id"`)
+	assert.Contains(t, pe.Msg, "must be a positive integer")
+}
+
+func TestParse_NegativeIDRejected(t *testing.T) {
+	yaml := `version: v0.0.1
+dependencies:
+  actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5:
+    branch: main
+    commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
+    owner_id: -1
+    repo_id: 2
+`
+	_, err := Parse([]byte(yaml))
+	require.Error(t, err)
+
+	var pe *ParseError
+	require.True(t, errors.As(err, &pe), "expected a *ParseError, got %T", err)
+	assert.Contains(t, pe.Msg, `"owner_id"`)
+	assert.Contains(t, pe.Msg, "must be a positive integer")
+}
+
 func TestParse_KnownFieldsAccepted(t *testing.T) {
 	yaml := `version: v0.0.1
 workflows:
