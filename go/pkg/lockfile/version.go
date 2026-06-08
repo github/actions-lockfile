@@ -8,6 +8,13 @@ import (
 
 // SemVer holds parsed semantic version components.
 //
+// API stability: the type and its comparison helpers (Greater, Narrows,
+// UpgradeOver, MajorTag, MinorTag, IsFull) are part of the exported surface
+// because the tag recommendation engine in downstream consumers relies on
+// them. Their semantics are deliberately non-strict-semver (see below) and are
+// committed to as-is; they are not internal helpers despite the
+// recommendation-engine flavor.
+//
 // GitHub Actions has no first-class version scheme — a uses: ref can be
 // any git ref (tag, branch, SHA, or even "main"). In practice most
 // action authors follow semver-ish conventions, but the ecosystem

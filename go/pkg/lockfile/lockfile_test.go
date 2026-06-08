@@ -30,8 +30,12 @@ func TestParse_FutureVersion_ReturnsFriendlyError(t *testing.T) {
 	msg := err.Error()
 	assert.Contains(t, msg, "v0.0.999", "should name the lockfile version")
 	assert.Contains(t, msg, Version, "should name the supported version")
-	assert.Contains(t, msg, "gh extension upgrade gh-actions-pin", "should tell the user how to upgrade")
-	assert.Contains(t, msg, "github.com/github/gh-actions-pin/releases", "should link to releases")
+	assert.Contains(t, msg, "upgrade", "should tell the user to upgrade")
+	// The library must stay tool-agnostic: ErrFutureVersion is consumed by
+	// external readers (Dependabot, actions-workflow-parser), so the message
+	// must not name a specific wrapping CLI. Consumers append their own
+	// upgrade instructions off errors.Is(err, ErrFutureVersion).
+	assert.NotContains(t, msg, "gh-actions-pin", "library message must not name a specific consumer tool")
 }
 
 func TestParse_FutureVersion_IsErrFutureVersion(t *testing.T) {
@@ -139,8 +143,8 @@ workflows:
 	require.NoError(t, err)
 
 	// Action map key is canonicalized so a lookup by Pin.String() hits.
-	meta, ok := f.Actions[canonical]
-	require.True(t, ok, "expected canonical key %q in actions; got keys: %v", canonical, mapKeys(f.Actions))
+	meta, ok := f.Dependencies[canonical]
+	require.True(t, ok, "expected canonical key %q in dependencies; got keys: %v", canonical, mapKeys(f.Dependencies))
 	assert.Equal(t, int64(1234), meta.OwnerID)
 	assert.Equal(t, int64(5678), meta.RepoID)
 
@@ -189,7 +193,7 @@ dependencies:
 `
 	f, err := Parse([]byte(yaml))
 	require.NoError(t, err)
-	assert.Len(t, f.Actions, 1)
+	assert.Len(t, f.Dependencies, 1)
 }
 
 func TestParse_UnparseableActionKeyPreserved(t *testing.T) {
@@ -205,7 +209,7 @@ dependencies:
 `
 	f, err := Parse([]byte(yaml))
 	require.NoError(t, err)
-	_, ok := f.Actions["not a pin"]
+	_, ok := f.Dependencies["not a pin"]
 	assert.True(t, ok)
 }
 
@@ -241,11 +245,11 @@ workflows: {}
 	f, err := Parse([]byte(yaml))
 	require.NoError(t, err)
 
-	withTag := f.Actions["actions/checkout@v6:sha1-8e8c483db84b4bee98b60c0593521ed34d9990e8"]
+	withTag := f.Dependencies["actions/checkout@v6:sha1-8e8c483db84b4bee98b60c0593521ed34d9990e8"]
 	assert.Equal(t, "v6", withTag.Tag)
 	assert.Equal(t, "main", withTag.Branch)
 
-	branchOnly := f.Actions["actions/internal@trunk:sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
+	branchOnly := f.Dependencies["actions/internal@trunk:sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
 	assert.Equal(t, "", branchOnly.Tag)
 	assert.Equal(t, "trunk", branchOnly.Branch)
 }

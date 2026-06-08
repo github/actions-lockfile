@@ -103,15 +103,15 @@ const Path = ".github/workflows/actions.lock"
 //	    uses:
 //	      - actions/cache@v4.0.0:sha1-...
 //
-// The Go-side field name `Actions` corresponds to the YAML key `dependencies:`
-// — the lockfile's deduplicated action DAG. Each entry's `uses:` list names
-// the action's direct nested dependencies, reusing the same canonical pin
-// keys. Workflow entries hold the full transitive closure as a flat list of
-// pin keys for cold readability.
+// The Go field `Dependencies` maps to the YAML key `dependencies:` — the
+// lockfile's deduplicated action DAG. Each entry's `uses:` list names the
+// action's direct nested dependencies, reusing the same canonical pin keys.
+// Workflow entries hold the full transitive closure as a flat list of pin
+// keys for cold readability.
 type File struct {
-	Version   string              `yaml:"version"`
-	Actions   map[string]Action   `yaml:"dependencies"`
-	Workflows map[string][]string `yaml:"workflows"`
+	Version      string              `yaml:"version"`
+	Dependencies map[string]Action   `yaml:"dependencies"`
+	Workflows    map[string][]string `yaml:"workflows"`
 
 	// node retains the parsed YAML tree so callers can resolve positions for
 	// their own diagnostics via Position/KeyPosition. It is nil on the
@@ -274,13 +274,9 @@ func Parse(contents []byte) (File, error) {
 		var wrapped error
 		if isFutureVersion(f.Version, Version) {
 			msg = fmt.Sprintf(
-				"lockfile version %s is newer than this binary supports (%s).\n"+
-					"This binary cannot safely interpret the newer lockfile format.\n\n"+
-					"To upgrade:\n"+
-					"  gh extension upgrade gh-actions-pin\n\n"+
-					"Or download the latest release:\n"+
-					"  https://github.com/github/gh-actions-pin/releases",
-				f.Version, Version,
+				"lockfile version %s is newer than this binary supports (%s); "+
+					"upgrade the tool that reads this lockfile to a build that supports %s",
+				f.Version, Version, f.Version,
 			)
 			wrapped = ErrFutureVersion
 		}
@@ -385,17 +381,17 @@ func validateKnownFields(f *File) *ParseError {
 	return nil
 }
 
-// canonicalizeActions rewrites the Actions map so every key is the
+// canonicalizeActions rewrites the Dependencies map so every key is the
 // canonical form of its pin (Pin.String()). A conflict between two
 // different source casings of the same pin is a parse error — the file
 // would be ambiguous about which Action metadata applies. On conflict it
 // returns the offending source key so callers can locate it in the YAML tree.
 func canonicalizeActions(f *File) (string, error) {
-	if len(f.Actions) == 0 {
+	if len(f.Dependencies) == 0 {
 		return "", nil
 	}
-	out := make(map[string]Action, len(f.Actions))
-	for key, action := range f.Actions {
+	out := make(map[string]Action, len(f.Dependencies))
+	for key, action := range f.Dependencies {
 		canonical := key
 		if pin, ok := ParsePin(key); ok {
 			canonical = pin.String()
@@ -420,7 +416,7 @@ func canonicalizeActions(f *File) (string, error) {
 		}
 		out[canonical] = action
 	}
-	f.Actions = out
+	f.Dependencies = out
 	return "", nil
 }
 
@@ -441,7 +437,7 @@ func equalAction(a, b Action) bool {
 }
 
 // canonicalizeWorkflowDependencies rewrites every workflow's pin list to
-// canonical pin strings (Pin.String()) so lookups into the Actions map are
+// canonical pin strings (Pin.String()) so lookups into the Dependencies map are
 // casing-agnostic. Unparseable entries are preserved verbatim for downstream
 // diagnostics to flag.
 func canonicalizeWorkflowDependencies(f *File) {

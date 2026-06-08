@@ -1,6 +1,7 @@
 package lockfile
 
 import (
+	"errors"
 	"os"
 	"testing"
 
@@ -22,6 +23,9 @@ func TestParseActionMeta(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			content, err := os.ReadFile(tt.file)
+			if errors.Is(err, os.ErrNotExist) {
+				t.Skip("testdata is not present in this module checkout (symlink to repo-root testdata is dropped from module zips)")
+			}
 			require.NoError(t, err)
 
 			meta, err := ParseActionMeta(string(content))

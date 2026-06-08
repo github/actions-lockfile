@@ -39,8 +39,9 @@ func (a ActionRef) FullName() string {
 // ParseActionRef parses a `uses:` string into an ActionRef. It returns
 // nil for any input that is not a repository action — expression-based
 // refs, local paths, docker images, reusable workflow files, or any
-// input containing control characters that would otherwise reach
-// downstream URL/GraphQL builders.
+// input whose owner/repo/path/ref components are unsafe to hand to the
+// downstream URL/GraphQL builders (control characters, traversal tokens,
+// or quote/whitespace metacharacters in the ref).
 //
 // The returned pointer is non-nil iff the input names a real repository
 // action (composite or javascript) at owner/repo[/path]@ref.
@@ -65,6 +66,9 @@ func ParseActionRef(uses string) *ActionRef {
 		return nil
 	}
 	ref := atParts[1]
+	if !isValidRef(ref) {
+		return nil
+	}
 
 	segments := strings.SplitN(atParts[0], "/", 3)
 	if len(segments) < 2 || segments[0] == "" || segments[1] == "" {
@@ -98,8 +102,10 @@ func ParseActionRef(uses string) *ActionRef {
 // names, and action path segments. GitHub allows alphanumerics, hyphens,
 // underscores, and periods; reject anything else to keep these values safe for
 // use in URL paths and GraphQL string literals without per-call escaping bugs.
+// The whole-segment values "." and ".." are rejected too — they aren't valid
+// segments anyway.
 func isValidSegment(s string) bool {
-	if s == "" {
+	if s == "" || s == "." || s == ".." {
 		return false
 	}
 	for _, r := range s {
@@ -109,6 +115,28 @@ func isValidSegment(s string) bool {
 		case r >= '0' && r <= '9':
 		case r == '-' || r == '_' || r == '.':
 		default:
+			return false
+		}
+	}
+	return true
+}
+
+// isValidRef gates the ref (the part after @). Git refs are permissive —
+// slashes, dots, plus signs, even an embedded @ (foo/bar@a@b -> ref "a@b") —
+// so this is a denylist, not an allowlist. It rejects what cannot survive
+// interpolation: whitespace, quotes, backtick, backslash, and the ".."
+// sequence (which git itself forbids, so no valid ref is lost). It does NOT
+// make the ref URL-path-safe; refs hold slashes. Escape downstream.
+func isValidRef(ref string) bool {
+	if ref == "" {
+		return false
+	}
+	if strings.Contains(ref, "..") {
+		return false
+	}
+	for _, r := range ref {
+		switch r {
+		case ' ', '\t', '\n', '\r', '\v', '\f', '"', '\'', '`', '\\':
 			return false
 		}
 	}
@@ -129,18 +157,14 @@ func isYAMLFile(path string) bool {
 }
 
 // isValidPath validates the subdirectory path segment of a uses: reference.
-// Each segment must be non-empty, not "." or "..", and contain only the
-// characters valid in GitHub repository paths (alphanumerics, hyphens,
-// underscores, and periods). This extends the security boundary from
-// owner/repo into the path component.
+// Each segment is validated by isValidSegment, which enforces the GitHub
+// character set and rejects the "." / ".." traversal tokens. This extends the
+// security boundary from owner/repo into the path component.
 func isValidPath(p string) bool {
 	if p == "" {
 		return false
 	}
 	for _, seg := range strings.Split(p, "/") {
-		if seg == "." || seg == ".." {
-			return false
-		}
 		if !isValidSegment(seg) {
 			return false
 		}
