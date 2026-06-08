@@ -27,6 +27,39 @@ die() {
   exit 1
 }
 
+# Smoke-test that a published module version resolves through the Go toolchain.
+# The repo is private, so resolution goes "direct" over git (the public proxy
+# can't see it) — the same path consumers use with GOPRIVATE=github.com/github/*.
+# Run locally this also warms your module cache. In CI, git auth is injected
+# from GH_TOKEN via GIT_CONFIG_* env so go's child git can fetch the tag.
+# Best-effort by design: callers treat a failure here as a warning, never a
+# release-blocker, since the tag and Release are already published.
+verify_module_resolves() {
+  local module_version="$1" dir status
+  dir="$(mktemp -d)"
+  (
+    cd "$dir"
+    go mod init release-verify >/dev/null 2>&1 || exit 1
+    local -a go_env=(
+      GOFLAGS=-mod=mod
+      GOPROXY=direct
+      GOPRIVATE="github.com/github/*"
+      GIT_TERMINAL_PROMPT=0
+    )
+    if [ -n "${GH_TOKEN:-}" ]; then
+      go_env+=(
+        GIT_CONFIG_COUNT=1
+        "GIT_CONFIG_KEY_0=url.https://x-access-token:${GH_TOKEN}@github.com/.insteadOf"
+        "GIT_CONFIG_VALUE_0=https://github.com/"
+      )
+    fi
+    env "${go_env[@]}" go mod download "${MODULE_PATH}@${module_version}"
+  )
+  status=$?
+  rm -rf "$dir"
+  return $status
+}
+
 bump="${1:-}"
 case "$bump" in
   patch | minor | major) ;;
@@ -112,9 +145,12 @@ git push origin "refs/tags/${tag}"
 # 7. Cut the GitHub Release from the tag we just pushed.
 gh release create "$tag" --title "$tag" --verify-tag --generate-notes
 
-# 8. Best-effort: prime the Go module proxy so `go get ...@${version}` resolves
-#    immediately instead of on first external fetch.
-curl -fsSL "https://proxy.golang.org/${MODULE_PATH}/@v/${version}.info" >/dev/null ||
-  echo "warning: proxy warm failed (non-fatal); the proxy will fetch on first use." >&2
+# 8. Best-effort: confirm the published version resolves (and warm the local
+#    cache). Never fails the release — tag and Release are already live.
+if verify_module_resolves "$version"; then
+  echo "Verified ${version} resolves via the module toolchain."
+else
+  echo "warning: could not verify ${version} via the toolchain (auth?); the tag and Release are published regardless." >&2
+fi
 
 echo "Released ${tag}."

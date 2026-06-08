@@ -16,9 +16,15 @@ tab, run the **Release** workflow from `main`, and choose a bump:
 
 CI runs `script/release`, which regenerates and verifies the tree, runs the
 full build, computes the next version from the latest `go/vX.Y.Z` tag, pushes
-the tag, cuts a GitHub Release with generated notes, and warms the Go module
-proxy. The first release has no prior tag, so it bases off `v0.0.0` — pick
-**minor** to land on `v0.1.0`.
+the tag, cuts a GitHub Release with generated notes, and confirms the new
+version resolves through the Go toolchain. The first release has no prior tag,
+so it bases off `v0.0.0` — pick **minor** to land on `v0.1.0`.
+
+This repo is private, so the public module proxy can't see it: the toolchain
+resolves it `direct` over git, the same path consumers use with
+`GOPRIVATE=github.com/github/*`. The resolution check is best-effort — a green
+tag and Release are the real deliverable. Run locally, it also warms your
+module cache.
 
 `script/release` is the single source of truth and runs locally too. Preview
 without touching anything:
