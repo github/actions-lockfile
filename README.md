@@ -1,9 +1,9 @@
 # actions-lockfile
 
-Parser for the GitHub Actions dependency lockfile format produced by
-[`gh actions-pin`](https://github.com/github/gh-actions-pin). The lockfile records
-the resolved transitive dependency graph for a repository's workflows so other
-tools can audit and verify the exact action pins in use.
+The authoritative definition of the GitHub Actions dependency lockfile
+format, plus a Go parser for it. The lockfile records the resolved transitive
+dependency graph for a repository's workflows so tools can audit and verify the
+exact action pins in use.
 
 ## Installation
 
@@ -99,29 +99,6 @@ dependencies:
 A canonical pin key is `OWNER/REPO@REF:ALGO-HEX`. The same key appears in both
 `workflows` (as flat transitive lists) and `dependencies` (as deduplicated
 graph entries with `uses:` links to direct dependencies).
-
-## What this package does
-
-- Parses `.github/workflows/actions.lock` and validates the structural subset
-  of the embedded schema.
-- Exposes the workflow → pin mapping and the deduplicated dependency graph.
-- Provides line/column positions for every key and value via `File.Position`
-  and `File.KeyPosition`, so editor tooling and CI can render precise
-  diagnostics.
-- Embeds the JSON Schema document for external validators via
-  `lockfile.Schema()`.
-- Parses `uses:` references and `action.yml` metadata
-  (`lockfile.ParseActionRef`, `lockfile.ParseActionMeta`) to support the
-  pinning workflow end-to-end.
-
-## What this package does not do
-
-- Resolve, fetch, or update action pins. That is `gh actions-pin`'s job.
-- Make policy decisions about whether a pin is acceptable.
-- Lint workflow YAML — see
-  [`actions/languageservices/workflow-parser`](https://github.com/actions/languageservices/tree/main/workflow-parser).
-- Generate the lockfile programmatically. The lockfile is machine-generated
-  by the CLI; this package is a reader, not a writer, in its current shape.
 
 ## Compatibility and stability
 
