@@ -37,6 +37,12 @@ func TestParseActionRef(t *testing.T) {
 		{name: "owner with space", input: "actions /checkout@v1", wantNil: true},
 		{name: "control char tab embedded", input: "actions/check\tout@v1", wantNil: true},
 		{name: "nested folder containing reusable workflow path is not reusable", input: "owner/repo/tools/.github/workflows/x.yml@v1", wantNWO: "owner/repo", wantPath: "tools/.github/workflows/x.yml", wantRef: "v1"},
+		{name: "path with space", input: "owner/repo/bad path@v1", wantNil: true},
+		{name: "path with quotes", input: `owner/repo/bad"path@v1`, wantNil: true},
+		{name: "path dotdot traversal", input: "owner/repo/../etc@v1", wantNil: true},
+		{name: "path single dot segment", input: "owner/repo/./foo@v1", wantNil: true},
+		{name: "path empty segment double slash", input: "owner/repo/a//b@v1", wantNil: true},
+		{name: "ref containing @", input: "foo/bar@a@b", wantNWO: "foo/bar", wantRef: "a@b"},
 	}
 
 	for _, tt := range tests {
