@@ -377,6 +377,55 @@ func validateKnownFields(f *File) *ParseError {
 				}
 			}
 		}
+		// Enforce non-zero values for fields where the zero value is
+		// meaningless and would silently disable a security check.
+		if pe := rejectZeroValues(action, pinKey.Value); pe != nil {
+			return pe
+		}
+	}
+	return nil
+}
+
+// nonEmptyStringKeys lists action fields that must be non-empty strings.
+var nonEmptyStringKeys = map[string]struct{}{
+	"branch": {},
+}
+
+// positiveIntKeys lists action fields that must be positive integers (> 0).
+var positiveIntKeys = map[string]struct{}{
+	"owner_id": {},
+	"repo_id":  {},
+}
+
+// rejectZeroValues checks that required action fields carry meaningful values:
+// string fields like "branch" must be non-empty, and integer ID fields like
+// "owner_id" and "repo_id" must be positive. A present-but-zero-value field
+// would silently disable the security check it's meant to enforce.
+func rejectZeroValues(action *yaml.Node, dep string) *ParseError {
+	for j := 0; j+1 < len(action.Content); j += 2 {
+		key := action.Content[j]
+		val := action.Content[j+1]
+
+		if _, ok := nonEmptyStringKeys[key.Value]; ok {
+			if val.Value == "" {
+				return &ParseError{
+					Line:   val.Line,
+					Column: val.Column,
+					Msg:    fmt.Sprintf("action field %q must not be empty for dependency %q", key.Value, dep),
+				}
+			}
+		}
+
+		if _, ok := positiveIntKeys[key.Value]; ok {
+			n, err := strconv.ParseInt(val.Value, 10, 64)
+			if err != nil || n <= 0 {
+				return &ParseError{
+					Line:   val.Line,
+					Column: val.Column,
+					Msg:    fmt.Sprintf("action field %q must be a positive integer for dependency %q", key.Value, dep),
+				}
+			}
+		}
 	}
 	return nil
 }
