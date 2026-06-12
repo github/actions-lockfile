@@ -242,13 +242,25 @@ type Action struct {
 // existence. That belongs to the consumer (e.g. gh-actions-pin's check
 // command).
 //
+// The optional paths parameter scopes per-dependency validation to only the
+// entries referenced by the named workflow paths (via f.Workflows[p]).
+// When paths is empty, every dependency entry is validated — the default for
+// whole-file tooling (CLI regen, Dependabot). When paths is non-empty, a
+// dependency entry outside the referenced set is left unchecked so one
+// corrupt entry doesn't fail unrelated workflows that share the lockfile.
+// A requested path absent from f.Workflows contributes zero entries and
+// validates nothing — fail-open by design for workflows not yet onboarded.
+//
+// Document-level invariants (version required/supported, unknown top-level
+// keys) always run regardless of paths.
+//
 // Action map keys and workflow dependency entries are canonicalized via
 // ParsePin so downstream lookups by canonical key (e.g. pin.String()) match
 // regardless of the source casing of owner/repo/algo/hex in the YAML.
 // Entries that do not parse as a valid pin are left untouched; consumers
 // can flag them via diagnostics. Workflow path keys are NOT canonicalized
 // — filesystem paths are case-sensitive on the platforms we run on.
-func Parse(contents []byte) (File, error) {
+func Parse(contents []byte, paths ...string) (File, error) {
 	var root yaml.Node
 	if err := yaml.Unmarshal(contents, &root); err != nil {
 		return File{}, newYAMLParseError(err)
@@ -286,7 +298,7 @@ func Parse(contents []byte) (File, error) {
 		}
 		return File{}, pe
 	}
-	if pe := validateKnownFields(&f); pe != nil {
+	if pe := validateKnownFields(&f, paths); pe != nil {
 		return File{}, pe
 	}
 	if conflictKey, err := canonicalizeActions(&f); err != nil {
@@ -333,7 +345,13 @@ var requiredActionKeys = []string{"branch", "commit", "owner_id", "repo_id"}
 // matching the stricter parsing the embedded schema describes. Map-valued
 // sections (workflow paths, dependency pin keys) carry arbitrary data keys and
 // are intentionally not constrained here.
-func validateKnownFields(f *File) *ParseError {
+//
+// When paths is non-empty, per-dependency checks (unknown keys, required keys,
+// zero-value rejection) are scoped to only the dependency entries referenced
+// by the union of f.Workflows[p] for each requested path. This prevents a
+// single corrupt entry from failing every workflow that shares the lockfile.
+// When paths is empty, every dependency entry is validated.
+func validateKnownFields(f *File, paths []string) *ParseError {
 	root := docMapping(f.node)
 	if root == nil {
 		return nil
@@ -348,12 +366,33 @@ func validateKnownFields(f *File) *ParseError {
 	if deps == nil || deps.Kind != yaml.MappingNode {
 		return nil
 	}
+
+	// Build the in-scope set from the raw (pre-canonicalization) workflow
+	// entries. nil means "validate all" (len(paths)==0); a non-nil but empty
+	// map means "validate nothing" (requested paths had no matching deps).
+	var inScope map[string]struct{}
+	if len(paths) > 0 {
+		inScope = make(map[string]struct{})
+		for _, p := range paths {
+			for _, pin := range f.Workflows[p] {
+				inScope[pin] = struct{}{}
+			}
+		}
+	}
+
 	for i := 0; i+1 < len(deps.Content); i += 2 {
 		pinKey := deps.Content[i]
 		action := deps.Content[i+1]
 		if action.Kind != yaml.MappingNode {
 			continue
 		}
+
+		if inScope != nil {
+			if _, ok := inScope[pinKey.Value]; !ok {
+				continue
+			}
+		}
+
 		present := make(map[string]struct{}, len(action.Content)/2)
 		for j := 0; j+1 < len(action.Content); j += 2 {
 			ak := action.Content[j]

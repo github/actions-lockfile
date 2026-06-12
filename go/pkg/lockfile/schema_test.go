@@ -209,3 +209,170 @@ dependencies:
 	assert.Len(t, f.Dependencies, 1)
 	assert.Contains(t, f.Workflows, ".github/workflows/ci.yml")
 }
+
+// corruptLockfile is a shared fixture for scoped-validation tests.
+// It has two deps: goodPin is valid, corruptPin is missing the required
+// "branch" field. Workflow A references only the good dep, workflow B
+// references only the corrupt dep.
+const (
+	goodPin    = "actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5"
+	corruptPin = "actions/setup-go@v5:sha1-0000000000000000000000000000000000000000"
+
+	corruptLockfile = `version: v0.0.1
+workflows:
+  .github/workflows/a.yml:
+    - actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
+  .github/workflows/b.yml:
+    - actions/setup-go@v5:sha1-0000000000000000000000000000000000000000
+dependencies:
+  actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5:
+    branch: main
+    commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
+    owner_id: 1
+    repo_id: 2
+  actions/setup-go@v5:sha1-0000000000000000000000000000000000000000:
+    commit: sha1-0000000000000000000000000000000000000000
+    owner_id: 3
+    repo_id: 4
+`
+)
+
+func TestParse_ScopedValidation_NoPaths_ErrorsOnCorruptEntry(t *testing.T) {
+	_, err := Parse([]byte(corruptLockfile))
+	require.Error(t, err)
+
+	var pe *ParseError
+	require.True(t, errors.As(err, &pe))
+	assert.Contains(t, pe.Msg, `missing required action field "branch"`)
+	assert.Contains(t, pe.Msg, corruptPin)
+}
+
+func TestParse_ScopedValidation_GoodPathOnly_OK(t *testing.T) {
+	f, err := Parse([]byte(corruptLockfile), ".github/workflows/a.yml")
+	require.NoError(t, err)
+	assert.Len(t, f.Dependencies, 2, "both deps should be present even though only one was validated")
+}
+
+func TestParse_ScopedValidation_CorruptPathOnly_Errors(t *testing.T) {
+	_, err := Parse([]byte(corruptLockfile), ".github/workflows/b.yml")
+	require.Error(t, err)
+
+	var pe *ParseError
+	require.True(t, errors.As(err, &pe))
+	assert.Contains(t, pe.Msg, `missing required action field "branch"`)
+	assert.Contains(t, pe.Msg, corruptPin)
+}
+
+func TestParse_ScopedValidation_AbsentPath_FailOpen(t *testing.T) {
+	f, err := Parse([]byte(corruptLockfile), ".github/workflows/c.yml")
+	require.NoError(t, err)
+	assert.Len(t, f.Dependencies, 2)
+}
+
+func TestParse_ScopedValidation_GoodAndCorruptPaths_Errors(t *testing.T) {
+	_, err := Parse([]byte(corruptLockfile), ".github/workflows/a.yml", ".github/workflows/b.yml")
+	require.Error(t, err)
+
+	var pe *ParseError
+	require.True(t, errors.As(err, &pe))
+	assert.Contains(t, pe.Msg, `missing required action field "branch"`)
+}
+
+func TestParse_ScopedValidation_UnknownActionField_InScope_Errors(t *testing.T) {
+	data := `version: v0.0.1
+workflows:
+  .github/workflows/a.yml:
+    - actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
+dependencies:
+  actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5:
+    branch: main
+    commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
+    owner_id: 1
+    repo_id: 2
+    flavor: spicy
+`
+	_, err := Parse([]byte(data), ".github/workflows/a.yml")
+	require.Error(t, err)
+
+	var pe *ParseError
+	require.True(t, errors.As(err, &pe))
+	assert.Contains(t, pe.Msg, `unknown action field "flavor"`)
+}
+
+func TestParse_ScopedValidation_UnknownActionField_OutOfScope_OK(t *testing.T) {
+	data := `version: v0.0.1
+workflows:
+  .github/workflows/b.yml:
+    - actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
+dependencies:
+  actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5:
+    branch: main
+    commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
+    owner_id: 1
+    repo_id: 2
+    flavor: spicy
+`
+	// "a.yml" is not in the workflows map, so the dep is out of scope.
+	_, err := Parse([]byte(data), ".github/workflows/a.yml")
+	require.NoError(t, err)
+}
+
+func TestParse_ScopedValidation_ZeroValue_InScope_Errors(t *testing.T) {
+	data := `version: v0.0.1
+workflows:
+  .github/workflows/a.yml:
+    - actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
+dependencies:
+  actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5:
+    branch: main
+    commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
+    owner_id: 0
+    repo_id: 2
+`
+	_, err := Parse([]byte(data), ".github/workflows/a.yml")
+	require.Error(t, err)
+
+	var pe *ParseError
+	require.True(t, errors.As(err, &pe))
+	assert.Contains(t, pe.Msg, `"owner_id"`)
+	assert.Contains(t, pe.Msg, "must be a positive integer")
+}
+
+func TestParse_ScopedValidation_ZeroValue_OutOfScope_OK(t *testing.T) {
+	data := `version: v0.0.1
+workflows:
+  .github/workflows/a.yml:
+    - actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
+dependencies:
+  actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5:
+    branch: main
+    commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
+    owner_id: 0
+    repo_id: 2
+`
+	// Ask for a path that doesn't reference this dep.
+	_, err := Parse([]byte(data), ".github/workflows/other.yml")
+	require.NoError(t, err)
+}
+
+func TestParse_ScopedValidation_UnknownTopLevel_StillErrors(t *testing.T) {
+	data := `version: v0.0.1
+typo_section: {}
+dependencies: {}
+`
+	_, err := Parse([]byte(data), ".github/workflows/a.yml")
+	require.Error(t, err)
+
+	var pe *ParseError
+	require.True(t, errors.As(err, &pe))
+	assert.Contains(t, pe.Msg, `unknown lockfile field "typo_section"`)
+}
+
+func TestParse_ScopedValidation_BadVersion_StillErrors(t *testing.T) {
+	data := `version: garbage
+dependencies: {}
+`
+	_, err := Parse([]byte(data), ".github/workflows/a.yml")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported dependency lockfile version")
+}
