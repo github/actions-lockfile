@@ -43,7 +43,8 @@
         },
         "branch": {
           "description": "A branch in the action's repository that contains the pinned commit. Required: it is the authenticity check. A legitimate release commit lives on a branch, while a commit that exists only as a dangling object — pushed to a fork or attached to a PR and never merged — belongs to no branch. Pinning by SHA alone can be tricked into trusting such an impostor commit; verifying the commit is reachable from a branch closes that gap.",
-          "type": "string"
+          "type": "string",
+          "minLength": 1
         },
         "commit": {
           "description": "The exact commit the action resolves to, in algo-prefixed digest form (e.g. sha1-...). This is the immutable identity the runner checks out; tags and branches can be moved, this cannot.",
@@ -51,11 +52,13 @@
         },
         "owner_id": {
           "description": "The numeric ID of the action's owner (user or org). Pinned because names can be deleted and re-registered by someone else; the ID cannot, so it ties the pin to the original owner.",
-          "type": "integer"
+          "type": "integer",
+          "minimum": 1
         },
         "repo_id": {
           "description": "The numeric ID of the action's repository. Pinned because a repo can be renamed or deleted and the name reclaimed; the ID detects that the repo behind the name has changed.",
-          "type": "integer"
+          "type": "integer",
+          "minimum": 1
         },
         "uses": {
           "description": "The action's own direct dependencies, as canonical pin keys, so the full dependency graph stays pinned and verifiable end to end. Required for composite actions (which can call other actions); absent for leaf actions that have no dependencies of their own.",
