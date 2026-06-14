@@ -35,7 +35,7 @@ func TestParse_FutureVersion_ReturnsFriendlyError(t *testing.T) {
 	// external readers (Dependabot, actions-workflow-parser), so the message
 	// must not name a specific wrapping CLI. Consumers append their own
 	// upgrade instructions off errors.Is(err, ErrFutureVersion).
-	assert.NotContains(t, msg, "gh-actions-pin", "library message must not name a specific consumer tool")
+	assert.NotContains(t, msg, "gh-actions-lock", "library message must not name a specific consumer tool")
 }
 
 func TestParse_FutureVersion_IsErrFutureVersion(t *testing.T) {

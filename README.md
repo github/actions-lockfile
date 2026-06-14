@@ -117,7 +117,7 @@ graph entries with `uses:` links to direct dependencies).
 
 ## Related projects
 
-- [`github/gh-actions-pin`](https://github.com/github/gh-actions-pin) —
+- [`github/gh-actions-lock`](https://github.com/github/gh-actions-lock) —
   produces and maintains lockfiles.
 - [`actions/languageservices/workflow-parser`](https://github.com/actions/languageservices/tree/main/workflow-parser) —
   parses workflow YAML. Sibling library: `workflow-parser` reads the `.yml`
@@ -137,7 +137,7 @@ make lint
 
 Schema changes (any modification to `schema/lockfile-vX.Y.Z.json`, generated
 language bindings, or the fields emitted in `dependencies` / `workflows`)
-require coordination with `github/gh-actions-pin` because the CLI is the
+require coordination with `github/gh-actions-lock` because the CLI is the
 schema's primary producer.
 
 ## License
