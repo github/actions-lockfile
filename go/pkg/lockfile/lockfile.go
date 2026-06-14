@@ -239,7 +239,7 @@ type Action struct {
 // supported. It enforces structural validity — unknown top-level keys are
 // rejected and required fields must be present — but does not validate pin
 // integrity (e.g. whether a SHA actually matches the ref) or action
-// existence. That belongs to the consumer (e.g. gh-actions-pin's check
+// existence. That belongs to the consumer (e.g. gh-actions-lock's check
 // command).
 //
 // The optional paths parameter scopes per-dependency validation to only the
