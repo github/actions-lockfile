@@ -110,9 +110,24 @@ const Path = ".github/workflows/actions.lock"
 // Workflow entries hold the full transitive closure as a flat list of pin
 // keys for cold readability.
 type File struct {
-	Version      string              `yaml:"version"`
-	Dependencies map[string]Action   `yaml:"dependencies"`
-	Workflows    map[string][]string `yaml:"workflows"`
+	// Version is the lockfile schema version string (e.g. "v0.0.1"). It is
+	// always equal to the [Version] constant for files Parse accepts.
+	Version string `yaml:"version"`
+
+	// Dependencies maps each canonical pin key (OWNER/REPO@REF:ALGO-HEX) to
+	// the resolved [Action] metadata for that pin. The map is deduplicated:
+	// multiple workflows that share an action produce a single entry here.
+	// Use [File.LookupWorkflow] to find the pin keys for a specific workflow,
+	// then index into this map to retrieve each action's metadata.
+	Dependencies map[string]Action `yaml:"dependencies"`
+
+	// Workflows maps each repo-relative workflow file path (e.g.
+	// ".github/workflows/release.yml") to the flat, transitive list of
+	// canonical pin keys that workflow depends on. Pin keys are in
+	// OWNER/REPO@REF:ALGO-HEX form and serve as lookup keys into
+	// [File.Dependencies]. Prefer [File.LookupWorkflow] over indexing this
+	// map directly.
+	Workflows map[string][]string `yaml:"workflows"`
 
 	// node retains the parsed YAML tree so callers can resolve positions for
 	// their own diagnostics via Position/KeyPosition. It is nil on the
