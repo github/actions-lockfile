@@ -1,24 +1,43 @@
-// Package lockfile is the source of truth for the workflow dependency
-// lockfile format and pin grammar.
+// Package lockfile is the source of truth for the GitHub Actions dependency
+// lockfile format and its Go parser.
 //
-// # Parsing as a security boundary
+// # Getting started
 //
-// ParseActionRef is the choke point. Untrusted uses: strings enter; only
-// concrete repository actions leave. Everything else — expressions, docker://
-// images, local paths, reusable workflows, control characters — returns nil,
-// before it can reach a URL or GraphQL builder.
+// [Parse] is the primary entry point. Hand it the raw bytes of
+// .github/workflows/actions.lock and it returns a [File] whose [File.Workflows]
+// and [File.Dependencies] maps let you look up every pinned action for a
+// workflow:
 //
-// ParseReusableWorkflowRef is its mirror: the reusable-workflow shape
-// ParseActionRef rejects, parsed through the same validation. Both split the
-// ref at the first @, never the last — a ref may legitimately contain one.
+//	f, err := lockfile.Parse(contents)
+//	pins, ok := f.LookupWorkflow(".github/workflows/release.yml")
 //
-// owner/repo/path pass isValidSegment: a fixed character set, ".."/"." barred.
-// Drop-in safe. The ref is looser by necessity — git refs carry slashes, dots,
-// even another @ — so isValidRef only guarantees it cannot escape a quoted
-// literal or smuggle a traversal. A ref still needs escaping before it touches
-// a URL path. Owner/repo do not.
+// [File.LookupWorkflow] returns canonical pin key strings. Each key can be
+// looked up in [File.Dependencies] to retrieve the associated [Action]
+// metadata (commit hash, branch, tag, repository IDs).
 //
-// Hand-rolled, no regexp, allocation-free, single-pass: it runs per dependency
-// on the hot path and the reject-lists must stay auditable at a glance. They
-// are load-bearing. Do not refactor them into regular expressions.
+// # Parsing uses: strings
+//
+// [ParseActionRef] parses a single `uses:` string from a workflow step into
+// its owner/repo/ref components. It returns nil for anything that is not a
+// repository action — expressions, docker:// images, local paths, reusable
+// workflow files — so callers never need to classify the input themselves.
+//
+// [ParseReusableWorkflowRef] is its mirror for the reusable-workflow shape
+// (owner/repo/.github/workflows/name.yml@ref) that ParseActionRef deliberately
+// rejects. Use [IsLocalReusableWorkflow] for the local ./.github/workflows/...
+// shape, which has no owner/repo and is handled differently.
+//
+// Both parsers split the ref at the FIRST @, not the last — a ref may
+// legitimately contain @ (e.g. a branch named "release@2024").
+//
+// # Security note for contributors
+//
+// owner/repo/path components pass isValidSegment (fixed character set,
+// ".."/"." barred) before reaching any URL or GraphQL builder. The ref is
+// validated by a denylist rather than an allowlist because git refs carry
+// slashes, dots, and embedded @; isValidRef only ensures the ref cannot escape
+// a quoted string or smuggle a path traversal. A ref still needs escaping
+// before use in URL paths. These validators are hand-rolled, allocation-free,
+// and single-pass because they run on the hot path. Do not replace them with
+// regular expressions.
 package lockfile
