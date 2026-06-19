@@ -98,6 +98,14 @@ func ParsePin(s string) (Pin, bool) {
 	if strings.ContainsRune(ref, ':') {
 		return Pin{}, false
 	}
+	// Validate the ref with the same denylist used by ParseActionRef so that
+	// a parsed Pin is safe to pass to URL builders and GraphQL string
+	// literals without per-call escaping. Without this check a crafted pin
+	// key like "owner/repo@v1 ; malicious:sha1-..." parses successfully and
+	// the caller receives a Pin.Ref containing shell metacharacters.
+	if !isValidRef(ref) {
+		return Pin{}, false
+	}
 	hashSpec := refHash[colonIdx+1:]
 
 	dashIdx := strings.IndexByte(hashSpec, '-')
