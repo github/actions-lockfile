@@ -281,3 +281,50 @@ dependencies:
 	assert.Contains(t, err.Error(), `"commit"`)
 	assert.Contains(t, err.Error(), "must not be empty")
 }
+
+func TestParse_CommitInvalidFormatRejected(t *testing.T) {
+	// A non-empty commit that isn't a valid algo-hex digest must be rejected.
+	// "notadigest", "sha1-", and "HEAD" look plausible but carry no integrity
+	// guarantee; consumers checking the algo and hex individually would silently
+	// accept them, defeating the lockfile's purpose.
+	cases := []struct {
+		name   string
+		commit string
+	}{
+		{"arbitrary string", "notadigest"},
+		{"no hex after dash", "sha1-"},
+		{"wrong length hex", "sha1-abc123"},
+		{"symbolic ref", "HEAD"},
+		{"sha1 prefix only", "sha1"},
+		{"non-hex chars", "sha1-zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			y := "version: v0.0.1\ndependencies:\n" +
+				"  actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:\n" +
+				"    branch: main\n" +
+				"    commit: " + tc.commit + "\n" +
+				"    owner_id: 1\n" +
+				"    repo_id: 1\n"
+			_, err := Parse([]byte(y))
+			require.Error(t, err, "commit %q should be rejected", tc.commit)
+			assert.Contains(t, err.Error(), "commit")
+		})
+	}
+}
+
+func TestParse_CommitValidFormatsAccepted(t *testing.T) {
+	cases := []string{
+		"sha1-11bd71901bbe5b1630ceea73d27597364c9af683",
+		"sha256-a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+	}
+	for _, commit := range cases {
+		t.Run(commit[:10], func(t *testing.T) {
+			pin := "actions/checkout@v4:" + commit
+			y := "version: v0.0.1\ndependencies:\n  " + pin + ":\n" +
+				"    branch: main\n    commit: " + commit + "\n    owner_id: 1\n    repo_id: 1\n"
+			_, err := Parse([]byte(y))
+			require.NoError(t, err)
+		})
+	}
+}

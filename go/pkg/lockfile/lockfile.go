@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -438,9 +439,10 @@ var positiveIntKeys = map[string]struct{}{
 }
 
 // rejectZeroValues checks that required action fields carry meaningful values:
-// string fields like "branch" must be non-empty, and integer ID fields like
-// "owner_id" and "repo_id" must be positive. A present-but-zero-value field
-// would silently disable the security check it's meant to enforce.
+// string fields like "branch" must be non-empty, integer ID fields like
+// "owner_id" and "repo_id" must be positive, and the "commit" field must be
+// a valid algo-hex digest string. A present-but-zero-value field would
+// silently disable the security check it's meant to enforce.
 func rejectZeroValues(action *yaml.Node, dep string) *ParseError {
 	for j := 0; j+1 < len(action.Content); j += 2 {
 		key := action.Content[j]
@@ -452,6 +454,16 @@ func rejectZeroValues(action *yaml.Node, dep string) *ParseError {
 					Line:   val.Line,
 					Column: val.Column,
 					Msg:    fmt.Sprintf("action field %q must not be empty for dependency %q", key.Value, dep),
+				}
+			}
+		}
+
+		if key.Value == "commit" && val.Value != "" {
+			if !isValidAlgoHex(val.Value) {
+				return &ParseError{
+					Line:   val.Line,
+					Column: val.Column,
+					Msg:    fmt.Sprintf("action field \"commit\" must be an algo-hex digest (e.g. \"sha1-abc...\") for dependency %q, got %q", dep, val.Value),
 				}
 			}
 		}
@@ -585,4 +597,18 @@ func parseSchemaVersion(v string) ([3]int, bool) {
 		out[i] = n
 	}
 	return out, true
+}
+
+// isValidAlgoHex reports whether s is a properly-formed algo-hex digest string
+// in the lockfile's "algo-hexdigest" format (e.g. "sha1-abc123..." or
+// "sha256-abc123..."). It delegates hex and length validation to isValidDigest
+// so the two never drift apart.
+func isValidAlgoHex(s string) bool {
+	dashIdx := strings.IndexByte(s, '-')
+	if dashIdx <= 0 || dashIdx == len(s)-1 {
+		return false
+	}
+	algo := strings.ToLower(s[:dashIdx])
+	hex := strings.ToLower(s[dashIdx+1:])
+	return isValidDigest(algo, hex)
 }
