@@ -128,3 +128,28 @@ func TestPin_IndexKey(t *testing.T) {
 		})
 	}
 }
+
+func TestParsePin_RefInjectionRejected(t *testing.T) {
+	// ParsePin must reject refs containing characters that are unsafe for
+	// URL paths and GraphQL string literals (spaces, quotes, backticks,
+	// backslash). Without this check a caller receives a Pin.Ref that
+	// injects into downstream shell commands or API calls.
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{"space in ref", "actions/checkout@v4 evil:sha1-11bd71901bbe5b1630ceea73d27597364c9af683"},
+		{"tab in ref", "actions/checkout@v4\tevil:sha1-11bd71901bbe5b1630ceea73d27597364c9af683"},
+		{"double-quote in ref", "actions/checkout@v4\"evil:sha1-11bd71901bbe5b1630ceea73d27597364c9af683"},
+		{"single-quote in ref", "actions/checkout@v4'evil:sha1-11bd71901bbe5b1630ceea73d27597364c9af683"},
+		{"backtick in ref", "actions/checkout@v4`evil:sha1-11bd71901bbe5b1630ceea73d27597364c9af683"},
+		{"backslash in ref", "actions/checkout@v4\\evil:sha1-11bd71901bbe5b1630ceea73d27597364c9af683"},
+		{"dotdot in ref", "actions/checkout@../evil:sha1-11bd71901bbe5b1630ceea73d27597364c9af683"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, ok := ParsePin(tc.input)
+			assert.False(t, ok, "ParsePin should reject ref with injection chars: %q", tc.input)
+		})
+	}
+}
