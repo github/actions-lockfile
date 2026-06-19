@@ -217,9 +217,23 @@ func mappingEntry(m *yaml.Node, key string) (k, v *yaml.Node) {
 	return nil, nil
 }
 
-// LookupWorkflow returns the dependency closure for the given repo-relative
-// workflow key (e.g. ".github/workflows/deploy.yml"). The returned bool
-// reports whether the key was found.
+// LookupWorkflow returns the flat, transitive list of canonical pin keys for
+// the given repo-relative workflow path (e.g. ".github/workflows/deploy.yml").
+// The returned bool reports whether the workflow path was found in the lockfile.
+//
+// Each string in the returned slice is a canonical pin key in
+// OWNER/REPO@REF:ALGO-HEX form. To retrieve the full action metadata for a
+// pin, look it up in [File.Dependencies]:
+//
+//	pins, ok := f.LookupWorkflow(".github/workflows/deploy.yml")
+//	for _, key := range pins {
+//	    action := f.Dependencies[key]
+//	    fmt.Println(action.Branch, action.Commit)
+//	}
+//
+// A workflow that is present in the lockfile but has no dependencies returns
+// an empty slice and ok=true. ok=false means the workflow path was never
+// onboarded into the lockfile at all.
 func (f File) LookupWorkflow(workflowKey string) ([]string, bool) {
 	w, ok := f.Workflows[workflowKey]
 	return w, ok
