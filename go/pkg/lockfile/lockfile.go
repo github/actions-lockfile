@@ -428,6 +428,7 @@ func validateKnownFields(f *File, paths []string) *ParseError {
 // nonEmptyStringKeys lists action fields that must be non-empty strings.
 var nonEmptyStringKeys = map[string]struct{}{
 	"branch": {},
+	"commit": {},
 }
 
 // positiveIntKeys lists action fields that must be positive integers (> 0).

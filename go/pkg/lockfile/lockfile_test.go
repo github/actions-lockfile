@@ -261,3 +261,23 @@ func mapKeys[V any](m map[string]V) []string {
 	}
 	return out
 }
+
+// ── Security hardening tests ──────────────────────────────────────────────────
+
+func TestParse_CommitEmptyStringRejected(t *testing.T) {
+	// commit:"" must be rejected: an empty commit SHA disables every downstream
+	// integrity check that reads Action.Commit, silently converting a
+	// required field into a no-op.
+	yaml := `version: v0.0.1
+dependencies:
+  actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:
+    branch: main
+    commit: ""
+    owner_id: 1
+    repo_id: 1
+`
+	_, err := Parse([]byte(yaml))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `"commit"`)
+	assert.Contains(t, err.Error(), "must not be empty")
+}
