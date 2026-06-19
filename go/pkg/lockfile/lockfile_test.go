@@ -360,3 +360,41 @@ dependencies:
 	_, err := Parse([]byte(yaml))
 	require.NoError(t, err)
 }
+
+func TestParse_WorkflowPathTraversalRejected(t *testing.T) {
+	// Workflow map keys are consumed as file paths by callers — accepting
+	// "../../../etc/passwd" or "/etc/shadow" as a key is an arbitrary read
+	// primitive for any consumer that calls os.Open(key).
+	cases := []struct {
+		name string
+		key  string
+	}{
+		{"parent traversal", "../../../etc/passwd"},
+		{"embedded traversal", ".github/../../../etc/passwd"},
+		{"absolute path", "/etc/shadow"},
+		{"double-dot segment", ".github/workflows/../../evil.yml"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			y := "version: v0.0.1\ndependencies: {}\nworkflows:\n  " + tc.key + ": []\n"
+			_, err := Parse([]byte(y))
+			require.Error(t, err, "workflow key %q should be rejected", tc.key)
+			assert.Contains(t, err.Error(), "workflow path key")
+		})
+	}
+}
+
+func TestParse_WorkflowPathLegitimateKeysAccepted(t *testing.T) {
+	legit := []string{
+		".github/workflows/ci.yml",
+		".github/workflows/release.yaml",
+		"custom/path/workflow.yml",
+	}
+	for _, key := range legit {
+		t.Run(key, func(t *testing.T) {
+			y := "version: v0.0.1\ndependencies: {}\nworkflows:\n  " + key + ": []\n"
+			_, err := Parse([]byte(y))
+			require.NoError(t, err)
+		})
+	}
+}
