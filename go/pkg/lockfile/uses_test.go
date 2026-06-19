@@ -137,6 +137,28 @@ func TestReusableWorkflowRefNames(t *testing.T) {
 	assert.Equal(t, "", ReusableWorkflowRef{}.NWO())
 }
 
+func TestIsLocalReusableWorkflow(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{name: "local reusable yml", input: "./.github/workflows/ci.yml", want: true},
+		{name: "local reusable yaml", input: "./.github/workflows/ci.yaml", want: true},
+		{name: "local composite action directory", input: "./my-action", want: false},
+		{name: "local composite no extension", input: "./my-action/", want: false},
+		{name: "remote action is not local", input: "actions/checkout@v4", want: false},
+		{name: "remote reusable workflow is not local", input: "octo/repo/.github/workflows/ci.yml@v1", want: false},
+		{name: "empty string", input: "", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, IsLocalReusableWorkflow(tt.input))
+		})
+	}
+}
+
+
 func TestIsReusableWorkflow(t *testing.T) {
 	tests := []struct {
 		name string
