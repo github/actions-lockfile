@@ -468,3 +468,67 @@ func TestParse_ExactMaxSizeAccepted(t *testing.T) {
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "too large")
 }
+
+func TestParse_UsesCycleRejected(t *testing.T) {
+	// A cycle in the uses graph (A uses B, B uses A) must be rejected.
+	// Any consumer that walks Action.Uses without its own cycle guard
+	// would loop infinitely on such a lockfile.
+	yaml := `version: v0.0.1
+dependencies:
+  actions/a@v1:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:
+    branch: main
+    commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683
+    owner_id: 1
+    repo_id: 1
+    uses:
+      - actions/b@v1:sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  actions/b@v1:sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:
+    branch: main
+    commit: sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    owner_id: 2
+    repo_id: 2
+    uses:
+      - actions/a@v1:sha1-11bd71901bbe5b1630ceea73d27597364c9af683
+`
+	_, err := Parse([]byte(yaml))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cycle")
+}
+
+func TestParse_UsesSelfCycleRejected(t *testing.T) {
+	// Self-referencing uses (A uses A) must also be caught.
+	yaml := `version: v0.0.1
+dependencies:
+  actions/a@v1:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:
+    branch: main
+    commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683
+    owner_id: 1
+    repo_id: 1
+    uses:
+      - actions/a@v1:sha1-11bd71901bbe5b1630ceea73d27597364c9af683
+`
+	_, err := Parse([]byte(yaml))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cycle")
+}
+
+func TestParse_UsesAcyclicAccepted(t *testing.T) {
+	// A valid DAG (A uses B, B has no uses) must parse successfully.
+	yaml := `version: v0.0.1
+dependencies:
+  actions/a@v1:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:
+    branch: main
+    commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683
+    owner_id: 1
+    repo_id: 1
+    uses:
+      - actions/b@v1:sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  actions/b@v1:sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:
+    branch: main
+    commit: sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    owner_id: 2
+    repo_id: 2
+`
+	_, err := Parse([]byte(yaml))
+	require.NoError(t, err)
+}
