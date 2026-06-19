@@ -323,7 +323,64 @@ func Parse(contents []byte, paths ...string) (File, error) {
 		return File{}, pe
 	}
 	canonicalizeWorkflowDependencies(&f)
+	if cycle, err := detectUsesCycle(&f); err != nil {
+		pe := &ParseError{Msg: err.Error()}
+		if l, c, ok := f.KeyPosition("dependencies", cycle); ok {
+			pe.Line, pe.Column = l, c
+		}
+		return File{}, pe
+	}
 	return f, nil
+}
+
+// detectUsesCycle reports a cycle in the action uses graph using
+// iterative DFS with three-colour marking. It returns the key of the node
+// that forms the back-edge, or ("", nil) when the graph is acyclic.
+//
+// A cycle in the uses graph means the lockfile's dependency set is not a
+// DAG. Any consumer that naively walks Action.Uses without its own cycle
+// guard would loop infinitely on a crafted lockfile.
+func detectUsesCycle(f *File) (cycleKey string, err error) {
+	const (
+		white = 0 // unvisited
+		grey  = 1 // on the current DFS stack
+		black = 2 // fully processed
+	)
+	color := make(map[string]int, len(f.Dependencies))
+
+	var visit func(key string) bool
+	visit = func(key string) bool {
+		if color[key] == grey {
+			cycleKey = key
+			return true
+		}
+		if color[key] == black {
+			return false
+		}
+		color[key] = grey
+		action, ok := f.Dependencies[key]
+		if ok {
+			for _, dep := range action.Uses {
+				if visit(dep) {
+					if cycleKey == "" {
+						cycleKey = key
+					}
+					return true
+				}
+			}
+		}
+		color[key] = black
+		return false
+	}
+
+	for key := range f.Dependencies {
+		if color[key] == white {
+			if visit(key) {
+				return cycleKey, fmt.Errorf("uses cycle detected at dependency %q", cycleKey)
+			}
+		}
+	}
+	return "", nil
 }
 
 // validateWorkflowPaths checks that every key in f.Workflows is a safe
