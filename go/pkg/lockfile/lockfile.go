@@ -302,6 +302,9 @@ func Parse(contents []byte, paths ...string) (File, error) {
 	if pe := validateKnownFields(&f, paths); pe != nil {
 		return File{}, pe
 	}
+	if pe := validateWorkflowPaths(&f); pe != nil {
+		return File{}, pe
+	}
 	if conflictKey, err := canonicalizeActions(&f); err != nil {
 		pe := &ParseError{Msg: err.Error(), err: err}
 		if l, c, ok := f.KeyPosition("dependencies", conflictKey); ok {
@@ -311,6 +314,54 @@ func Parse(contents []byte, paths ...string) (File, error) {
 	}
 	canonicalizeWorkflowDependencies(&f)
 	return f, nil
+}
+
+// validateWorkflowPaths checks that every key in f.Workflows is a safe
+// repo-relative file path. Workflow keys are used by consumers as file paths
+// (e.g. to open the workflow file on disk), so a crafted lockfile with a key
+// like "../../../etc/passwd" or an absolute path "/etc/shadow" would give
+// any consumer that calls os.Open(key) an arbitrary-read primitive.
+//
+// Rules:
+//   - Must not be empty.
+//   - Must not be an absolute path (no leading "/").
+//   - Must not contain ".." as a path segment — rejects traversal after
+//     path.Clean even if embedded in a longer path.
+//   - Must not contain null bytes or other control characters.
+func validateWorkflowPaths(f *File) *ParseError {
+	_, workflowsNode := mappingEntry(docMapping(f.node), "workflows")
+	for key := range f.Workflows {
+		if err := checkWorkflowPathKey(key); err != nil {
+			pe := &ParseError{Msg: err.Error()}
+			if workflowsNode != nil {
+				if k, _ := mappingEntry(workflowsNode, key); k != nil {
+					pe.Line, pe.Column = k.Line, k.Column
+				}
+			}
+			return pe
+		}
+	}
+	return nil
+}
+
+func checkWorkflowPathKey(p string) error {
+	if p == "" {
+		return fmt.Errorf("workflow path key must not be empty")
+	}
+	if strings.HasPrefix(p, "/") {
+		return fmt.Errorf("workflow path key must be repo-relative, not absolute: %q", p)
+	}
+	for _, c := range p {
+		if c <= 0x1F || c == 0x7F {
+			return fmt.Errorf("workflow path key contains control characters: %q", p)
+		}
+	}
+	for _, seg := range strings.Split(p, "/") {
+		if seg == ".." {
+			return fmt.Errorf("workflow path key contains path traversal: %q", p)
+		}
+	}
+	return nil
 }
 
 // allowedFileKeys is the set of permitted top-level lockfile keys. It mirrors
