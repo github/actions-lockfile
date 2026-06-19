@@ -273,36 +273,49 @@ type Action struct {
 	Uses    []string `yaml:"uses,omitempty"`
 }
 
-// Parse unmarshals YAML lockfile contents and verifies the version is
-// supported. It enforces structural validity — unknown top-level keys are
-// rejected and required fields must be present — but does not validate pin
-// integrity (e.g. whether a SHA actually matches the ref) or action
-// existence. That belongs to the consumer (e.g. gh-actions-lock's check
-// command).
+// Parse unmarshals the raw bytes of a lockfile and returns the parsed [File].
+// Pass the contents of .github/workflows/actions.lock (available as the
+// [Path] constant) or any other lockfile source.
 //
-// The optional paths parameter scopes per-dependency validation to only the
-// entries referenced by the named workflow paths (via f.Workflows[p]).
+// Parse checks structural validity — unknown top-level keys are rejected
+// and required [Action] fields must be present — but does not verify pin
+// integrity (e.g. that a SHA matches the ref) or that actions exist on
+// GitHub. Those checks belong to the caller (e.g. the check command in
+// gh-actions-lock).
+//
 // MaxParseSize is the maximum number of bytes Parse will accept. Inputs larger
 // than this are rejected before any YAML parsing takes place to prevent
 // memory-exhaustion DoS from oversized or yaml-bomb documents.
 const MaxParseSize = 1 << 20 // 1 MiB
-
-// When paths is empty, every dependency entry is validated — the default for
-// whole-file tooling (CLI regen, Dependabot). When paths is non-empty, a
-// dependency entry outside the referenced set is left unchecked so one
-// corrupt entry doesn't fail unrelated workflows that share the lockfile.
-// A requested path absent from f.Workflows contributes zero entries and
-// validates nothing — fail-open by design for workflows not yet onboarded.
 //
-// Document-level invariants (version required/supported, unknown top-level
-// keys) always run regardless of paths.
+// # Optional paths parameter
 //
-// Action map keys and workflow dependency entries are canonicalized via
-// ParsePin so downstream lookups by canonical key (e.g. pin.String()) match
-// regardless of the source casing of owner/repo/algo/hex in the YAML.
-// Entries that do not parse as a valid pin are left untouched; consumers
-// can flag them via diagnostics. Workflow path keys are NOT canonicalized
-// — filesystem paths are case-sensitive on the platforms we run on.
+// The variadic paths parameter is optional. Most callers should omit it.
+//
+//   - Omit paths (or pass nil) to validate every dependency entry in the
+//     lockfile. This is the right choice for whole-file tooling: CLI
+//     regeneration, Dependabot, schema linters.
+//
+//   - Pass one or more repo-relative workflow file paths (e.g.
+//     ".github/workflows/deploy.yml") to limit field validation to only the
+//     dependency entries referenced by those workflows. Entries outside the
+//     requested set are still parsed and returned, but required-field checks
+//     are skipped for them. This lets a single corrupt unrelated entry fail
+//     without blocking the workflows you actually care about.
+//
+// A path that does not appear in the lockfile's workflows map silently
+// contributes zero entries to validate — the lockfile is returned as-is for
+// that path. This is intentional: a workflow not yet onboarded into the
+// lockfile should not cause Parse to fail.
+//
+// # Canonicalization
+//
+// Action map keys and workflow dependency entries are lowercased via
+// [ParsePin] so that lookups by [Pin.String] succeed regardless of the
+// source casing of owner, repo, algorithm, or hex in the YAML. Entries
+// that are not valid pin strings are preserved verbatim for caller
+// diagnostics. Workflow path keys are NOT canonicalized — file paths are
+// case-sensitive on Linux.
 func Parse(contents []byte, paths ...string) (File, error) {
 	if len(contents) > MaxParseSize {
 		return File{}, &ParseError{
