@@ -245,6 +245,11 @@ type Action struct {
 //
 // The optional paths parameter scopes per-dependency validation to only the
 // entries referenced by the named workflow paths (via f.Workflows[p]).
+// MaxParseSize is the maximum number of bytes Parse will accept. Inputs larger
+// than this are rejected before any YAML parsing takes place to prevent
+// memory-exhaustion DoS from oversized or yaml-bomb documents.
+const MaxParseSize = 1 << 20 // 1 MiB
+
 // When paths is empty, every dependency entry is validated — the default for
 // whole-file tooling (CLI regen, Dependabot). When paths is non-empty, a
 // dependency entry outside the referenced set is left unchecked so one
@@ -262,6 +267,11 @@ type Action struct {
 // can flag them via diagnostics. Workflow path keys are NOT canonicalized
 // — filesystem paths are case-sensitive on the platforms we run on.
 func Parse(contents []byte, paths ...string) (File, error) {
+	if len(contents) > MaxParseSize {
+		return File{}, &ParseError{
+			Msg: fmt.Sprintf("lockfile too large: %d bytes (max %d)", len(contents), MaxParseSize),
+		}
+	}
 	var root yaml.Node
 	if err := yaml.Unmarshal(contents, &root); err != nil {
 		return File{}, newYAMLParseError(err)

@@ -443,3 +443,28 @@ func TestParse_TagInjectionCharsRejected(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsafe characters")
 }
+
+func TestParse_OversizedInputRejected(t *testing.T) {
+	// An input larger than MaxParseSize must be rejected before any YAML
+	// parsing so that memory-exhaustion DoS from oversized documents is
+	// prevented at the library boundary.
+	oversized := make([]byte, MaxParseSize+1)
+	for i := range oversized {
+		oversized[i] = 'x'
+	}
+	_, err := Parse(oversized)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "too large")
+}
+
+func TestParse_ExactMaxSizeAccepted(t *testing.T) {
+	// A document at exactly MaxParseSize must not be size-rejected
+	// (it will fail for other reasons, but not the size check).
+	atMax := make([]byte, MaxParseSize)
+	for i := range atMax {
+		atMax[i] = 'x'
+	}
+	_, err := Parse(atMax)
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "too large")
+}
