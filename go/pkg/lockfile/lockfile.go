@@ -496,6 +496,18 @@ func canonicalizeActions(f *File) (string, error) {
 		canonical := key
 		if pin, ok := ParsePin(key); ok {
 			canonical = pin.String()
+			// The commit field in the action body must match the digest
+			// embedded in the pin key. A mismatch is a trust-confusion
+			// attack: the caller looks up the action by key (and its
+			// embedded hash) but the body carries a different hash that
+			// a different downstream check might trust.
+			pinDigest := pin.Algo + "-" + pin.Hex
+			if action.Commit != "" && action.Commit != pinDigest {
+				return key, fmt.Errorf(
+					"action %q commit field %q disagrees with pin key digest %q",
+					canonical, action.Commit, pinDigest,
+				)
+			}
 		}
 		// Canonicalize Uses entries too so cross-references resolve.
 		if len(action.Uses) > 0 {

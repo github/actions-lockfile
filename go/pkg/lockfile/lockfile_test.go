@@ -328,3 +328,35 @@ func TestParse_CommitValidFormatsAccepted(t *testing.T) {
 		})
 	}
 }
+
+func TestParse_CommitMismatchWithPinKeyRejected(t *testing.T) {
+	// The commit field in the action body must match the digest embedded in
+	// the pin key. A mismatch is a trust-confusion attack: a consumer that
+	// checks action.Commit trusts a different hash than the pin key they
+	// used to look up the action.
+	yaml := `version: v0.0.1
+dependencies:
+  actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:
+    branch: main
+    commit: sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    owner_id: 1
+    repo_id: 1
+`
+	_, err := Parse([]byte(yaml))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "disagrees with pin key digest")
+}
+
+func TestParse_CommitMatchingPinKeyAccepted(t *testing.T) {
+	// When commit matches the pin key digest, parse must succeed.
+	yaml := `version: v0.0.1
+dependencies:
+  actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:
+    branch: main
+    commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683
+    owner_id: 1
+    repo_id: 1
+`
+	_, err := Parse([]byte(yaml))
+	require.NoError(t, err)
+}
