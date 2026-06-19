@@ -398,3 +398,48 @@ func TestParse_WorkflowPathLegitimateKeysAccepted(t *testing.T) {
 		})
 	}
 }
+
+func TestParse_BranchInjectionCharsRejected(t *testing.T) {
+	// branch values are used in GraphQL queries, log output, and sometimes
+	// shell commands. Characters that survive YAML parsing but are unsafe
+	// for downstream interpolation (backslash, `..`, whitespace) must be
+	// rejected by our validator.
+	cases := []struct {
+		name       string
+		yamlBranch string // value as it appears in YAML (double-quoted to reach our validator)
+	}{
+		// YAML double-quoted escape \\ → literal backslash in parsed value
+		{"backslash", `"main\\evil"`},
+		// YAML double-quoted \t → literal tab
+		{"tab", `"main\tevil"`},
+		// YAML double-quoted \n → literal newline
+		{"newline", `"main\nevil"`},
+		// unquoted dotdot traversal
+		{"dotdot", "../main"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			y := "version: v0.0.1\ndependencies:\n" +
+				"  actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:\n" +
+				"    branch: " + tc.yamlBranch + "\n" +
+				"    commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683\n" +
+				"    owner_id: 1\n    repo_id: 1\n"
+			_, err := Parse([]byte(y))
+			require.Error(t, err, "branch %q should be rejected", tc.yamlBranch)
+			assert.Contains(t, err.Error(), "unsafe characters")
+		})
+	}
+}
+
+func TestParse_TagInjectionCharsRejected(t *testing.T) {
+	// tag is optional but when present must not carry injection characters.
+	y := "version: v0.0.1\ndependencies:\n" +
+		"  actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:\n" +
+		"    branch: main\n" +
+		"    tag: \"../../etc/passwd; rm -rf /\"\n" +
+		"    commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683\n" +
+		"    owner_id: 1\n    repo_id: 1\n"
+	_, err := Parse([]byte(y))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsafe characters")
+}

@@ -491,9 +491,11 @@ var positiveIntKeys = map[string]struct{}{
 
 // rejectZeroValues checks that required action fields carry meaningful values:
 // string fields like "branch" must be non-empty, integer ID fields like
-// "owner_id" and "repo_id" must be positive, and the "commit" field must be
-// a valid algo-hex digest string. A present-but-zero-value field would
-// silently disable the security check it's meant to enforce.
+// "owner_id" and "repo_id" must be positive, the "commit" field must be
+// a valid algo-hex digest string, and the "branch"/"tag" fields must not
+// contain characters that are unsafe for downstream interpolation. A
+// present-but-zero-value or injection-bearing field would silently disable
+// the security check it's meant to enforce, or arm a downstream injection.
 func rejectZeroValues(action *yaml.Node, dep string) *ParseError {
 	for j := 0; j+1 < len(action.Content); j += 2 {
 		key := action.Content[j]
@@ -515,6 +517,21 @@ func rejectZeroValues(action *yaml.Node, dep string) *ParseError {
 					Line:   val.Line,
 					Column: val.Column,
 					Msg:    fmt.Sprintf("action field \"commit\" must be an algo-hex digest (e.g. \"sha1-abc...\") for dependency %q, got %q", dep, val.Value),
+				}
+			}
+		}
+
+		// branch and tag values are used in GraphQL queries, log output,
+		// and sometimes shell commands by consumers. Validate them with
+		// the same denylist that ParseActionRef applies to refs so that a
+		// crafted lockfile cannot arm a downstream injection through these
+		// fields.
+		if (key.Value == "branch" || key.Value == "tag") && val.Value != "" {
+			if !isValidRef(val.Value) {
+				return &ParseError{
+					Line:   val.Line,
+					Column: val.Column,
+					Msg:    fmt.Sprintf("action field %q contains unsafe characters for dependency %q: %q", key.Value, dep, val.Value),
 				}
 			}
 		}
