@@ -16,22 +16,21 @@ import (
 // scraping the error string.
 var ErrFutureVersion = errors.New("lockfile version is newer than this binary supports")
 
-// ParseError describes a failure to parse a dependency lockfile.
+// ParseError describes a failure to parse a dependency lockfile. It is always
+// returned (via errors.As) by [Parse] rather than plain errors, so callers can
+// print file:line:col diagnostics without scraping error strings.
 //
 // Line and Column, when non-zero, are the 1-indexed position within the
-// lockfile contents that the failure refers to. They index the lockfile
-// itself, never a consumer's workflow file, so callers can anchor diagnostics
-// on the lockfile (.github/workflows/actions.lock) rather than scraping
-// yaml.v3's error string themselves.
+// lockfile bytes that the failure refers to. They index the lockfile file
+// (.github/workflows/actions.lock), not any workflow .yml file.
 //
-// Column is populated for semantic failures Parse detects itself (it walks the
-// retained YAML node tree to the offending key/value). It is left zero for raw
-// yaml.v3 decode failures, whose errors report only a line: a malformed
-// document has no node tree to read a column from, and yaml.v3 type errors
-// carry a line but no column.
+// Column is set for semantic failures that Parse detects by walking the
+// retained YAML tree (e.g. an unknown field, a duplicate pin key). It is zero
+// for low-level YAML syntax errors where only a line number is available —
+// a structurally malformed document has no node tree to resolve a column from.
 //
-// Msg is the human-readable reason with yaml.v3's "yaml:" package prefix and
-// leading position removed.
+// Msg is the human-readable description of the failure, without any position
+// prefix. Use Error() to get the full "line N, column M: reason" string.
 type ParseError struct {
 	Line   int
 	Column int
