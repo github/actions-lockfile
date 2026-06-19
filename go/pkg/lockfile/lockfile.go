@@ -228,19 +228,28 @@ func (f File) LookupWorkflow(workflowKey string) ([]string, bool) {
 // Action carries the per-action metadata recorded in the lockfile under the
 // pin key.
 //
-// Tag is the discovered release/tag at the commit, if one exists. Optional.
+// Tag is the release/tag name at the pinned commit, if one exists. Optional:
+// commits that are not tagged (e.g. pinned directly to a branch SHA) omit
+// this field.
 //
-// Branch is a branch that contains the pinned commit. Required: a commit not
-// on any branch is an impostor / fork-network signal, so Parse rejects an
-// Action without one. It is the authenticity check that SHA-only pinning
-// lacks.
+// Branch is a branch of the action's repository that contains the pinned
+// commit. Required: Parse rejects an Action without one. A valid branch
+// confirms that the commit exists in the expected repository — a SHA that
+// isn't reachable from any branch in the source repo could belong to a fork
+// or an attacker-supplied commit, which SHA-only pinning cannot detect.
 //
-// Commit holds the digest in algo-prefixed form (e.g. "sha1-..." or
-// "sha256-..."). Required.
+// Commit holds the digest in algo-prefixed form (e.g. "sha1-abc123..." or
+// "sha256-def456..."). This is the same digest that appears in the pin key.
+// Required.
+//
+// OwnerID and RepoID are the GitHub numeric IDs for the action's repository
+// owner and repository respectively. Consumers use them to detect if the
+// action has been transferred to a new owner between lockfile regenerations —
+// a repository transfer changes the owner name but not the owner ID.
 //
 // Uses lists the action's direct nested dependencies (composite action
-// `uses:` steps) as canonical pin keys. Empty for leaf actions; required for
-// composites, a condition Parse can't enforce structurally.
+// `uses:` steps) as canonical pin keys. Empty for leaf actions (node,
+// docker); populated for composite actions.
 type Action struct {
 	Tag     string   `yaml:"tag,omitempty"`
 	Branch  string   `yaml:"branch,omitempty"`
