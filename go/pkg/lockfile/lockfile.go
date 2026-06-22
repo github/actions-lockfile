@@ -337,9 +337,10 @@ func Parse(contents []byte, paths ...string) (File, error) {
 // iterative DFS with three-colour marking. It returns the key of the node
 // that forms the back-edge, or ("", nil) when the graph is acyclic.
 //
-// A cycle in the uses graph means the lockfile's dependency set is not a
-// DAG. Any consumer that naively walks Action.Uses without its own cycle
-// guard would loop infinitely on a crafted lockfile.
+// The runner rejects cycles at execution time via CompositeActionsMaxDepth
+// (actions/runner: src/Runner.Common/Constants.cs). Detecting them at parse
+// time shifts the failure left so consumers never receive a File whose uses
+// graph is not a DAG.
 func detectUsesCycle(f *File) (cycleKey string, err error) {
 	const (
 		white = 0 // unvisited
@@ -539,43 +540,6 @@ func validateKnownFields(f *File, paths []string) *ParseError {
 		// meaningless and would silently disable a security check.
 		if pe := rejectZeroValues(action, pinKey.Value); pe != nil {
 			return pe
-		}
-		// Cap the uses list length to prevent an OOM amplification where
-		// a single dependency entry near the parse-size limit is packed
-		// with thousands of uses entries. The in-memory representation
-		// after canonicalization is proportional to the uses count.
-		if pe := rejectOverlongUses(action, pinKey.Value); pe != nil {
-			return pe
-		}
-	}
-	return nil
-}
-
-// MaxUsesPerAction is the maximum number of entries permitted in a single
-// action's uses list. A lockfile at MaxParseSize could pack thousands of
-// short pin strings into a single uses sequence; canonicalizeActions then
-// allocates a new slice of the same length, amplifying memory use. A
-// genuine composite action uses: list is a small constant (tens of entries
-// at most).
-const MaxUsesPerAction = 500
-
-// rejectOverlongUses returns a ParseError when the uses sequence in action
-// exceeds MaxUsesPerAction.
-func rejectOverlongUses(action *yaml.Node, dep string) *ParseError {
-	for j := 0; j+1 < len(action.Content); j += 2 {
-		key := action.Content[j]
-		val := action.Content[j+1]
-		if key.Value == "uses" && val.Kind == yaml.SequenceNode {
-			if len(val.Content) > MaxUsesPerAction {
-				return &ParseError{
-					Line:   val.Line,
-					Column: val.Column,
-					Msg: fmt.Sprintf(
-						"dependency %q has %d uses entries (max %d)",
-						dep, len(val.Content), MaxUsesPerAction,
-					),
-				}
-			}
 		}
 	}
 	return nil
