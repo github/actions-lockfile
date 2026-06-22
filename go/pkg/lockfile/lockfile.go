@@ -124,7 +124,7 @@ type File struct {
 	// ".github/workflows/release.yml") to the flat, transitive list of
 	// canonical pin keys that workflow depends on. Pin keys are in
 	// OWNER/REPO@REF:ALGO-HEX form and serve as lookup keys into
-	// [File.Dependencies]. Prefer [File.LookupWorkflow] over indexing this
+	// Dependencies. Prefer [File.LookupWorkflow] over indexing this
 	// map directly.
 	Workflows map[string][]string `yaml:"workflows"`
 
@@ -223,7 +223,7 @@ func mappingEntry(m *yaml.Node, key string) (k, v *yaml.Node) {
 //
 // Each string in the returned slice is a canonical pin key in
 // OWNER/REPO@REF:ALGO-HEX form. To retrieve the full action metadata for a
-// pin, look it up in [File.Dependencies]:
+// pin, look it up in File.Dependencies:
 //
 //	pins, ok := f.LookupWorkflow(".github/workflows/deploy.yml")
 //	for _, key := range pins {

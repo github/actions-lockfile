@@ -4,15 +4,15 @@
 // # Getting started
 //
 // [Parse] is the primary entry point. Hand it the raw bytes of
-// .github/workflows/actions.lock and it returns a [File] whose [File.Workflows]
-// and [File.Dependencies] maps let you look up every pinned action for a
+// .github/workflows/actions.lock and it returns a [File] whose Workflows
+// and Dependencies maps let you look up every pinned action for a
 // workflow:
 //
 //	f, err := lockfile.Parse(contents)
 //	pins, ok := f.LookupWorkflow(".github/workflows/release.yml")
 //
 // [File.LookupWorkflow] returns canonical pin key strings. Each key can be
-// looked up in [File.Dependencies] to retrieve the associated [Action]
+// looked up in File.Dependencies to retrieve the associated [Action]
 // metadata (commit hash, branch, tag, repository IDs).
 //
 // # Parsing uses: strings
