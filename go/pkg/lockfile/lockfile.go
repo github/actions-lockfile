@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -244,6 +245,11 @@ type Action struct {
 //
 // The optional paths parameter scopes per-dependency validation to only the
 // entries referenced by the named workflow paths (via f.Workflows[p]).
+// MaxParseSize is the maximum number of bytes Parse will accept. Inputs larger
+// than this are rejected before any YAML parsing takes place to prevent
+// memory-exhaustion DoS from oversized or yaml-bomb documents.
+const MaxParseSize = 1 << 20 // 1 MiB
+
 // When paths is empty, every dependency entry is validated — the default for
 // whole-file tooling (CLI regen, Dependabot). When paths is non-empty, a
 // dependency entry outside the referenced set is left unchecked so one
@@ -261,6 +267,11 @@ type Action struct {
 // can flag them via diagnostics. Workflow path keys are NOT canonicalized
 // — filesystem paths are case-sensitive on the platforms we run on.
 func Parse(contents []byte, paths ...string) (File, error) {
+	if len(contents) > MaxParseSize {
+		return File{}, &ParseError{
+			Msg: fmt.Sprintf("lockfile too large: %d bytes (max %d)", len(contents), MaxParseSize),
+		}
+	}
 	var root yaml.Node
 	if err := yaml.Unmarshal(contents, &root); err != nil {
 		return File{}, newYAMLParseError(err)
@@ -301,6 +312,9 @@ func Parse(contents []byte, paths ...string) (File, error) {
 	if pe := validateKnownFields(&f, paths); pe != nil {
 		return File{}, pe
 	}
+	if pe := validateWorkflowPaths(&f); pe != nil {
+		return File{}, pe
+	}
 	if conflictKey, err := canonicalizeActions(&f); err != nil {
 		pe := &ParseError{Msg: err.Error(), err: err}
 		if l, c, ok := f.KeyPosition("dependencies", conflictKey); ok {
@@ -309,7 +323,124 @@ func Parse(contents []byte, paths ...string) (File, error) {
 		return File{}, pe
 	}
 	canonicalizeWorkflowDependencies(&f)
+	if cycle, err := detectUsesCycle(&f); err != nil {
+		pe := &ParseError{Msg: err.Error()}
+		if l, c, ok := f.KeyPosition("dependencies", cycle); ok {
+			pe.Line, pe.Column = l, c
+		}
+		return File{}, pe
+	}
 	return f, nil
+}
+
+// detectUsesCycle reports a cycle in the action uses graph using
+// recursive DFS with three-colour marking. It returns the key of the node
+// that forms the back-edge, or ("", nil) when the graph is acyclic.
+//
+// The recursion depth is bounded by the number of unique keys in
+// f.Dependencies, which is itself bounded by MaxParseSize (a 1 MiB file
+// can hold at most ~5,000 dependency entries). Go's default goroutine stack
+// grows dynamically up to 1 GB, so 5,000 frames is well within budget.
+//
+// The runner rejects cycles at execution time via CompositeActionsMaxDepth
+// (actions/runner: src/Runner.Common/Constants.cs). Detecting them at parse
+// time shifts the failure left so consumers never receive a File whose uses
+// graph is not a DAG.
+func detectUsesCycle(f *File) (cycleKey string, err error) {
+	const (
+		white = 0 // unvisited
+		grey  = 1 // on the current DFS stack
+		black = 2 // fully processed
+	)
+	color := make(map[string]int, len(f.Dependencies))
+
+	var visit func(key string) bool
+	visit = func(key string) bool {
+		if color[key] == grey {
+			cycleKey = key
+			return true
+		}
+		if color[key] == black {
+			return false
+		}
+		color[key] = grey
+		action, ok := f.Dependencies[key]
+		if ok {
+			for _, dep := range action.Uses {
+				if visit(dep) {
+					if cycleKey == "" {
+						cycleKey = key
+					}
+					return true
+				}
+			}
+		}
+		color[key] = black
+		return false
+	}
+
+	for key := range f.Dependencies {
+		if color[key] == white {
+			if visit(key) {
+				return cycleKey, fmt.Errorf("uses cycle detected at dependency %q", cycleKey)
+			}
+		}
+	}
+	return "", nil
+}
+
+// validateWorkflowPaths checks that every key in f.Workflows is a safe
+// repo-relative file path. Workflow keys are used by consumers as file paths
+// (e.g. to open the workflow file on disk), so a crafted lockfile with a key
+// like "../../../etc/passwd" or an absolute path "/etc/shadow" would give
+// any consumer that calls os.Open(key) an arbitrary-read primitive.
+//
+// Rules:
+//   - Must not be empty.
+//   - Must not be an absolute path (no leading "/").
+//   - Must not contain ".." as a path segment — rejects traversal after
+//     path.Clean even if embedded in a longer path.
+//   - Must not contain null bytes or other control characters.
+func validateWorkflowPaths(f *File) *ParseError {
+	_, workflowsNode := mappingEntry(docMapping(f.node), "workflows")
+	for key := range f.Workflows {
+		if err := checkWorkflowPathKey(key); err != nil {
+			pe := &ParseError{Msg: err.Error()}
+			if workflowsNode != nil {
+				if k, _ := mappingEntry(workflowsNode, key); k != nil {
+					pe.Line, pe.Column = k.Line, k.Column
+				}
+			}
+			return pe
+		}
+	}
+	return nil
+}
+
+func checkWorkflowPathKey(p string) error {
+	if p == "" {
+		return fmt.Errorf("workflow path key must not be empty")
+	}
+	if strings.HasPrefix(p, "/") {
+		return fmt.Errorf("workflow path key must be repo-relative, not absolute: %q", p)
+	}
+	for _, c := range p {
+		if c <= 0x1F || c == 0x7F {
+			return fmt.Errorf("workflow path key contains control characters: %q", p)
+		}
+		// Reject backslash and colon to prevent Windows-style absolute paths
+		// (e.g. "C:\..." or UNC "\\server\...") and backslash-based traversal
+		// (e.g. "..\\..\\.." ) from bypassing the forward-slash checks above.
+		if c == '\\' || c == ':' {
+			return fmt.Errorf("workflow path key contains invalid character %q: %q", string(c), p)
+		}
+	}
+	for _, seg := range strings.Split(p, "/") {
+		if seg == ".." {
+			return fmt.Errorf("workflow path key contains path traversal: %q", p)
+		}
+	}
+	return nil
 }
 
 // allowedFileKeys is the set of permitted top-level lockfile keys. It mirrors
@@ -428,6 +559,7 @@ func validateKnownFields(f *File, paths []string) *ParseError {
 // nonEmptyStringKeys lists action fields that must be non-empty strings.
 var nonEmptyStringKeys = map[string]struct{}{
 	"branch": {},
+	"commit": {},
 }
 
 // positiveIntKeys lists action fields that must be positive integers (> 0).
@@ -437,9 +569,12 @@ var positiveIntKeys = map[string]struct{}{
 }
 
 // rejectZeroValues checks that required action fields carry meaningful values:
-// string fields like "branch" must be non-empty, and integer ID fields like
-// "owner_id" and "repo_id" must be positive. A present-but-zero-value field
-// would silently disable the security check it's meant to enforce.
+// string fields like "branch" must be non-empty, integer ID fields like
+// "owner_id" and "repo_id" must be positive, the "commit" field must be
+// a valid algo-hex digest string, and the "branch"/"tag" fields must not
+// contain characters that are unsafe for downstream interpolation. A
+// present-but-zero-value or injection-bearing field would silently disable
+// the security check it's meant to enforce, or arm a downstream injection.
 func rejectZeroValues(action *yaml.Node, dep string) *ParseError {
 	for j := 0; j+1 < len(action.Content); j += 2 {
 		key := action.Content[j]
@@ -451,6 +586,31 @@ func rejectZeroValues(action *yaml.Node, dep string) *ParseError {
 					Line:   val.Line,
 					Column: val.Column,
 					Msg:    fmt.Sprintf("action field %q must not be empty for dependency %q", key.Value, dep),
+				}
+			}
+		}
+
+		if key.Value == "commit" && val.Value != "" {
+			if !isValidAlgoHex(val.Value) {
+				return &ParseError{
+					Line:   val.Line,
+					Column: val.Column,
+					Msg:    fmt.Sprintf("action field \"commit\" must be an algo-hex digest (e.g. \"sha1-abc...\") for dependency %q, got %q", dep, val.Value),
+				}
+			}
+		}
+
+		// branch and tag values are used in GraphQL queries, log output,
+		// and sometimes shell commands by consumers. Validate them with
+		// the same denylist that ParseActionRef applies to refs so that a
+		// crafted lockfile cannot arm a downstream injection through these
+		// fields.
+		if (key.Value == "branch" || key.Value == "tag") && val.Value != "" {
+			if !isValidRef(val.Value) {
+				return &ParseError{
+					Line:   val.Line,
+					Column: val.Column,
+					Msg:    fmt.Sprintf("action field %q contains unsafe characters for dependency %q: %q", key.Value, dep, val.Value),
 				}
 			}
 		}
@@ -483,6 +643,18 @@ func canonicalizeActions(f *File) (string, error) {
 		canonical := key
 		if pin, ok := ParsePin(key); ok {
 			canonical = pin.String()
+			// The commit field in the action body must match the digest
+			// embedded in the pin key. A mismatch is a trust-confusion
+			// attack: the caller looks up the action by key (and its
+			// embedded hash) but the body carries a different hash that
+			// a different downstream check might trust.
+			pinDigest := pin.Algo + "-" + pin.Hex
+			if action.Commit != "" && action.Commit != pinDigest {
+				return key, fmt.Errorf(
+					"action %q commit field %q disagrees with pin key digest %q",
+					canonical, action.Commit, pinDigest,
+				)
+			}
 		}
 		// Canonicalize Uses entries too so cross-references resolve.
 		if len(action.Uses) > 0 {
@@ -584,4 +756,18 @@ func parseSchemaVersion(v string) ([3]int, bool) {
 		out[i] = n
 	}
 	return out, true
+}
+
+// isValidAlgoHex reports whether s is a properly-formed algo-hex digest string
+// in the lockfile's "algo-hexdigest" format (e.g. "sha1-abc123..." or
+// "sha256-abc123..."). It delegates hex and length validation to isValidDigest
+// so the two never drift apart.
+func isValidAlgoHex(s string) bool {
+	dashIdx := strings.IndexByte(s, '-')
+	if dashIdx <= 0 || dashIdx == len(s)-1 {
+		return false
+	}
+	algo := strings.ToLower(s[:dashIdx])
+	hex := strings.ToLower(s[dashIdx+1:])
+	return isValidDigest(algo, hex)
 }
