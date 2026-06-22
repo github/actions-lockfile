@@ -228,7 +228,7 @@ func mappingEntry(m *yaml.Node, key string) (k, v *yaml.Node) {
 //	pins, ok := f.LookupWorkflow(".github/workflows/deploy.yml")
 //	for _, key := range pins {
 //	    action := f.Dependencies[key]
-//	    fmt.Println(action.Branch, action.Commit)
+//	    fmt.Println(action.Ref, action.Commit)
 //	}
 //
 // A workflow that is present in the lockfile but has no dependencies returns
@@ -242,15 +242,8 @@ func (f File) LookupWorkflow(workflowKey string) ([]string, bool) {
 // Action carries the per-action metadata recorded in the lockfile under the
 // pin key.
 //
-// Tag is the release/tag name at the pinned commit, if one exists. Optional:
-// commits that are not tagged (e.g. pinned directly to a branch SHA) omit
-// this field.
-//
-// Branch is a branch of the action's repository that contains the pinned
-// commit. Required: Parse rejects an Action without one. A valid branch
-// confirms that the commit exists in the expected repository — a SHA that
-// isn't reachable from any branch in the source repo could belong to a fork
-// or an attacker-supplied commit, which SHA-only pinning cannot detect.
+// Ref is the git ref (tag or branch) the commit was resolved from, if known.
+// Optional: not every pinned commit has a symbolic ref recorded.
 //
 // Commit holds the digest in algo-prefixed form (e.g. "sha1-abc123..." or
 // "sha256-def456..."). This is the same digest that appears in the pin key.
@@ -265,8 +258,7 @@ func (f File) LookupWorkflow(workflowKey string) ([]string, bool) {
 // `uses:` steps) as canonical pin keys. Empty for leaf actions (node,
 // docker); populated for composite actions.
 type Action struct {
-	Tag     string   `yaml:"tag,omitempty"`
-	Branch  string   `yaml:"branch,omitempty"`
+	Ref     string   `yaml:"ref,omitempty"`
 	Commit  string   `yaml:"commit,omitempty"`
 	OwnerID int64    `yaml:"owner_id"`
 	RepoID  int64    `yaml:"repo_id"`
@@ -504,8 +496,7 @@ var allowedFileKeys = map[string]struct{}{
 // allowedActionKeys is the set of permitted keys within a dependency's Action
 // mapping. It mirrors the $defs/action properties in lockfile-v0.0.1.json.
 var allowedActionKeys = map[string]struct{}{
-	"tag":      {},
-	"branch":   {},
+	"ref":      {},
 	"commit":   {},
 	"owner_id": {},
 	"repo_id":  {},
@@ -514,10 +505,10 @@ var allowedActionKeys = map[string]struct{}{
 
 // requiredActionKeys lists the keys every dependency's Action mapping must
 // carry, in report order. It mirrors the $defs/action "required" list in
-// lockfile-v0.0.1.json. `tag` is optional (not every commit is a release) and
-// `uses` is required only for composite actions — a condition the lockfile
-// alone can't express — so neither appears here.
-var requiredActionKeys = []string{"branch", "commit", "owner_id", "repo_id"}
+// lockfile-v0.0.1.json. `ref` is optional (not every commit has a symbolic
+// ref recorded) and `uses` is required only for composite actions — a
+// condition the lockfile alone can't express — so neither appears here.
+var requiredActionKeys = []string{"commit", "owner_id", "repo_id"}
 
 // validateKnownFields enforces the schema's additionalProperties:false and
 // required rules on the lockfile's fixed-shape mappings — the document root and
@@ -608,7 +599,6 @@ func validateKnownFields(f *File, paths []string) *ParseError {
 
 // nonEmptyStringKeys lists action fields that must be non-empty strings.
 var nonEmptyStringKeys = map[string]struct{}{
-	"branch": {},
 	"commit": {},
 }
 
@@ -619,12 +609,12 @@ var positiveIntKeys = map[string]struct{}{
 }
 
 // rejectZeroValues checks that required action fields carry meaningful values:
-// string fields like "branch" must be non-empty, integer ID fields like
-// "owner_id" and "repo_id" must be positive, the "commit" field must be
-// a valid algo-hex digest string, and the "branch"/"tag" fields must not
-// contain characters that are unsafe for downstream interpolation. A
-// present-but-zero-value or injection-bearing field would silently disable
-// the security check it's meant to enforce, or arm a downstream injection.
+// the "commit" field must be non-empty and a valid algo-hex digest string,
+// integer ID fields like "owner_id" and "repo_id" must be positive, and
+// the "ref" field (when present) must not contain characters that are unsafe
+// for downstream interpolation. A present-but-zero-value or injection-bearing
+// field would silently disable the security check it's meant to enforce, or
+// arm a downstream injection.
 func rejectZeroValues(action *yaml.Node, dep string) *ParseError {
 	for j := 0; j+1 < len(action.Content); j += 2 {
 		key := action.Content[j]
@@ -650,12 +640,11 @@ func rejectZeroValues(action *yaml.Node, dep string) *ParseError {
 			}
 		}
 
-		// branch and tag values are used in GraphQL queries, log output,
-		// and sometimes shell commands by consumers. Validate them with
-		// the same denylist that ParseActionRef applies to refs so that a
-		// crafted lockfile cannot arm a downstream injection through these
-		// fields.
-		if (key.Value == "branch" || key.Value == "tag") && val.Value != "" {
+		// ref values are used in GraphQL queries, log output, and
+		// sometimes shell commands by consumers. Validate with the same
+		// denylist that ParseActionRef applies to refs so that a crafted
+		// lockfile cannot arm a downstream injection through this field.
+		if key.Value == "ref" && val.Value != "" {
 			if !isValidRef(val.Value) {
 				return &ParseError{
 					Line:   val.Line,
@@ -731,7 +720,7 @@ func canonicalizeActions(f *File) (string, error) {
 }
 
 func equalAction(a, b Action) bool {
-	if a.Tag != b.Tag || a.Branch != b.Branch || a.Commit != b.Commit ||
+	if a.Ref != b.Ref || a.Commit != b.Commit ||
 		a.OwnerID != b.OwnerID || a.RepoID != b.RepoID {
 		return false
 	}

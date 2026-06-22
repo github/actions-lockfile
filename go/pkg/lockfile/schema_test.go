@@ -98,11 +98,10 @@ dependencies:
 }
 
 func TestParse_MissingRequiredActionFieldRejected(t *testing.T) {
-	// owner_id/repo_id/commit present, but branch (required) is absent.
+	// owner_id/repo_id present, but commit (required) is absent.
 	yaml := `version: v0.0.1
 dependencies:
   actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5:
-    commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
     owner_id: 1
     repo_id: 2
 `
@@ -111,18 +110,17 @@ dependencies:
 
 	var pe *ParseError
 	require.True(t, errors.As(err, &pe), "expected a *ParseError, got %T", err)
-	assert.Contains(t, pe.Msg, `missing required action field "branch"`)
+	assert.Contains(t, pe.Msg, `missing required action field "commit"`)
 	assert.Contains(t, pe.Msg, "actions/checkout@v4", "message should name the offending dependency")
 	assert.Equal(t, 3, pe.Line, "error anchors on the dependency's pin key")
 	assert.Greater(t, pe.Column, 0, "expected a column anchored on the pin key")
 }
 
-func TestParse_EmptyBranchRejected(t *testing.T) {
+func TestParse_EmptyCommitRejected(t *testing.T) {
 	yaml := `version: v0.0.1
 dependencies:
   actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5:
-    branch: ""
-    commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
+    commit: ""
     owner_id: 1
     repo_id: 2
 `
@@ -131,7 +129,7 @@ dependencies:
 
 	var pe *ParseError
 	require.True(t, errors.As(err, &pe), "expected a *ParseError, got %T", err)
-	assert.Contains(t, pe.Msg, `"branch"`)
+	assert.Contains(t, pe.Msg, `"commit"`)
 	assert.Contains(t, pe.Msg, "must not be empty")
 }
 
@@ -139,7 +137,6 @@ func TestParse_ZeroOwnerIDRejected(t *testing.T) {
 	yaml := `version: v0.0.1
 dependencies:
   actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5:
-    branch: main
     commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
     owner_id: 0
     repo_id: 2
@@ -157,7 +154,6 @@ func TestParse_ZeroRepoIDRejected(t *testing.T) {
 	yaml := `version: v0.0.1
 dependencies:
   actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5:
-    branch: main
     commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
     owner_id: 1
     repo_id: 0
@@ -175,7 +171,6 @@ func TestParse_NegativeIDRejected(t *testing.T) {
 	yaml := `version: v0.0.1
 dependencies:
   actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5:
-    branch: main
     commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
     owner_id: -1
     repo_id: 2
@@ -196,8 +191,7 @@ workflows:
     - actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
 dependencies:
   actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5:
-    tag: v4
-    branch: main
+    ref: v4
     commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
     owner_id: 1
     repo_id: 2
@@ -212,7 +206,7 @@ dependencies:
 
 // corruptLockfile is a shared fixture for scoped-validation tests.
 // It has two deps: goodPin is valid, corruptPin is missing the required
-// "branch" field. Workflow A references only the good dep, workflow B
+// "commit" field. Workflow A references only the good dep, workflow B
 // references only the corrupt dep.
 const (
 	goodPin    = "actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5"
@@ -226,12 +220,10 @@ workflows:
     - actions/setup-go@v5:sha1-0000000000000000000000000000000000000000
 dependencies:
   actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5:
-    branch: main
     commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
     owner_id: 1
     repo_id: 2
   actions/setup-go@v5:sha1-0000000000000000000000000000000000000000:
-    commit: sha1-0000000000000000000000000000000000000000
     owner_id: 3
     repo_id: 4
 `
@@ -243,7 +235,7 @@ func TestParse_ScopedValidation_NoPaths_ErrorsOnCorruptEntry(t *testing.T) {
 
 	var pe *ParseError
 	require.True(t, errors.As(err, &pe))
-	assert.Contains(t, pe.Msg, `missing required action field "branch"`)
+	assert.Contains(t, pe.Msg, `missing required action field "commit"`)
 	assert.Contains(t, pe.Msg, corruptPin)
 }
 
@@ -259,7 +251,7 @@ func TestParse_ScopedValidation_CorruptPathOnly_Errors(t *testing.T) {
 
 	var pe *ParseError
 	require.True(t, errors.As(err, &pe))
-	assert.Contains(t, pe.Msg, `missing required action field "branch"`)
+	assert.Contains(t, pe.Msg, `missing required action field "commit"`)
 	assert.Contains(t, pe.Msg, corruptPin)
 }
 
@@ -275,7 +267,7 @@ func TestParse_ScopedValidation_GoodAndCorruptPaths_Errors(t *testing.T) {
 
 	var pe *ParseError
 	require.True(t, errors.As(err, &pe))
-	assert.Contains(t, pe.Msg, `missing required action field "branch"`)
+	assert.Contains(t, pe.Msg, `missing required action field "commit"`)
 }
 
 func TestParse_ScopedValidation_UnknownActionField_InScope_Errors(t *testing.T) {
@@ -285,7 +277,6 @@ workflows:
     - actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
 dependencies:
   actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5:
-    branch: main
     commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
     owner_id: 1
     repo_id: 2
@@ -306,7 +297,6 @@ workflows:
     - actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
 dependencies:
   actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5:
-    branch: main
     commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
     owner_id: 1
     repo_id: 2
@@ -324,7 +314,6 @@ workflows:
     - actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
 dependencies:
   actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5:
-    branch: main
     commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
     owner_id: 0
     repo_id: 2
@@ -345,7 +334,6 @@ workflows:
     - actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
 dependencies:
   actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5:
-    branch: main
     commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
     owner_id: 0
     repo_id: 2

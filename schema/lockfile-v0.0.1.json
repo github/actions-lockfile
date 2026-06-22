@@ -35,16 +35,11 @@
       "description": "Resolved metadata for a single pinned action.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["branch", "commit", "owner_id", "repo_id"],
+      "required": ["commit", "owner_id", "repo_id"],
       "properties": {
-        "tag": {
-          "description": "The release or tag the commit was published as, if any. Optional: not every pinned commit corresponds to a tag.",
+        "ref": {
+          "description": "The git ref (tag or branch) the commit was resolved from, if known. Optional: not every pinned commit has a symbolic ref recorded.",
           "type": "string"
-        },
-        "branch": {
-          "description": "A branch in the action's repository that contains the pinned commit. Required: it is the authenticity check. A legitimate release commit lives on a branch, while a commit that exists only as a dangling object — pushed to a fork or attached to a PR and never merged — belongs to no branch. Pinning by SHA alone can be tricked into trusting such an impostor commit; verifying the commit is reachable from a branch closes that gap.",
-          "type": "string",
-          "minLength": 1
         },
         "commit": {
           "description": "The exact commit the action resolves to, in algo-prefixed digest form (e.g. sha1-...). This is the immutable identity the runner checks out; tags and branches can be moved, this cannot.",

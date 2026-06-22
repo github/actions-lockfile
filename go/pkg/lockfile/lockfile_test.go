@@ -131,7 +131,6 @@ func TestParse_CanonicalizesActionKeys(t *testing.T) {
 	yaml := `version: v0.0.1
 dependencies:
   Actions/Checkout@v6:SHA1-8E8C483DB84B4BEE98B60C0593521ED34D9990E8:
-    branch: main
     commit: sha1-8e8c483db84b4bee98b60c0593521ed34d9990e8
     owner_id: 1234
     repo_id: 5678
@@ -161,12 +160,10 @@ func TestParse_ConflictingActionKeyCasings(t *testing.T) {
 	yaml := `version: v0.0.1
 dependencies:
   actions/checkout@v6:sha1-8e8c483db84b4bee98b60c0593521ed34d9990e8:
-    branch: main
     commit: sha1-8e8c483db84b4bee98b60c0593521ed34d9990e8
     owner_id: 1234
     repo_id: 5678
   Actions/Checkout@v6:SHA1-8E8C483DB84B4BEE98B60C0593521ED34D9990E8:
-    branch: main
     commit: sha1-8e8c483db84b4bee98b60c0593521ed34d9990e8
     owner_id: 9999
     repo_id: 1
@@ -181,12 +178,10 @@ func TestParse_DuplicateActionKeyCasingsSameMetadataOK(t *testing.T) {
 	yaml := `version: v0.0.1
 dependencies:
   actions/checkout@v6:sha1-8e8c483db84b4bee98b60c0593521ed34d9990e8:
-    branch: main
     commit: sha1-8e8c483db84b4bee98b60c0593521ed34d9990e8
     owner_id: 1234
     repo_id: 5678
   Actions/Checkout@v6:SHA1-8E8C483DB84B4BEE98B60C0593521ED34D9990E8:
-    branch: main
     commit: sha1-8e8c483db84b4bee98b60c0593521ed34d9990e8
     owner_id: 1234
     repo_id: 5678
@@ -202,7 +197,6 @@ func TestParse_UnparseableActionKeyPreserved(t *testing.T) {
 	yaml := `version: v0.0.1
 dependencies:
   "not a pin":
-    branch: main
     commit: sha1-8e8c483db84b4bee98b60c0593521ed34d9990e8
     owner_id: 1
     repo_id: 2
@@ -226,17 +220,15 @@ workflows:
 	assert.True(t, ok)
 }
 
-func TestParse_TagAndBranchRoundTrip(t *testing.T) {
+func TestParse_RefRoundTrip(t *testing.T) {
 	yaml := `version: v0.0.1
 dependencies:
   actions/checkout@v6:sha1-8e8c483db84b4bee98b60c0593521ed34d9990e8:
-    tag: v6
-    branch: main
+    ref: v6
     commit: sha1-8e8c483db84b4bee98b60c0593521ed34d9990e8
     owner_id: 1234
     repo_id: 5678
   actions/internal@trunk:sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:
-    branch: trunk
     commit: sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     owner_id: 1
     repo_id: 2
@@ -245,13 +237,11 @@ workflows: {}
 	f, err := Parse([]byte(yaml))
 	require.NoError(t, err)
 
-	withTag := f.Dependencies["actions/checkout@v6:sha1-8e8c483db84b4bee98b60c0593521ed34d9990e8"]
-	assert.Equal(t, "v6", withTag.Tag)
-	assert.Equal(t, "main", withTag.Branch)
+	withRef := f.Dependencies["actions/checkout@v6:sha1-8e8c483db84b4bee98b60c0593521ed34d9990e8"]
+	assert.Equal(t, "v6", withRef.Ref)
 
-	branchOnly := f.Dependencies["actions/internal@trunk:sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
-	assert.Equal(t, "", branchOnly.Tag)
-	assert.Equal(t, "trunk", branchOnly.Branch)
+	noRef := f.Dependencies["actions/internal@trunk:sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
+	assert.Equal(t, "", noRef.Ref)
 }
 
 func mapKeys[V any](m map[string]V) []string {
@@ -271,7 +261,6 @@ func TestParse_CommitEmptyStringRejected(t *testing.T) {
 	yaml := `version: v0.0.1
 dependencies:
   actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:
-    branch: main
     commit: ""
     owner_id: 1
     repo_id: 1
@@ -302,7 +291,6 @@ func TestParse_CommitInvalidFormatRejected(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			y := "version: v0.0.1\ndependencies:\n" +
 				"  actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:\n" +
-				"    branch: main\n" +
 				"    commit: " + tc.commit + "\n" +
 				"    owner_id: 1\n" +
 				"    repo_id: 1\n"
@@ -322,7 +310,7 @@ func TestParse_CommitValidFormatsAccepted(t *testing.T) {
 		t.Run(commit[:10], func(t *testing.T) {
 			pin := "actions/checkout@v4:" + commit
 			y := "version: v0.0.1\ndependencies:\n  " + pin + ":\n" +
-				"    branch: main\n    commit: " + commit + "\n    owner_id: 1\n    repo_id: 1\n"
+				"    commit: " + commit + "\n    owner_id: 1\n    repo_id: 1\n"
 			_, err := Parse([]byte(y))
 			require.NoError(t, err)
 		})
@@ -337,7 +325,6 @@ func TestParse_CommitMismatchWithPinKeyRejected(t *testing.T) {
 	yaml := `version: v0.0.1
 dependencies:
   actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:
-    branch: main
     commit: sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     owner_id: 1
     repo_id: 1
@@ -352,7 +339,6 @@ func TestParse_CommitMatchingPinKeyAccepted(t *testing.T) {
 	yaml := `version: v0.0.1
 dependencies:
   actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:
-    branch: main
     commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683
     owner_id: 1
     repo_id: 1
@@ -402,14 +388,14 @@ func TestParse_WorkflowPathLegitimateKeysAccepted(t *testing.T) {
 	}
 }
 
-func TestParse_BranchInjectionCharsRejected(t *testing.T) {
-	// branch values are used in GraphQL queries, log output, and sometimes
+func TestParse_RefInjectionCharsRejected(t *testing.T) {
+	// ref values are used in GraphQL queries, log output, and sometimes
 	// shell commands. Characters that survive YAML parsing but are unsafe
 	// for downstream interpolation (backslash, `..`, whitespace) must be
 	// rejected by our validator.
 	cases := []struct {
-		name       string
-		yamlBranch string // value as it appears in YAML (double-quoted to reach our validator)
+		name    string
+		yamlRef string // value as it appears in YAML (double-quoted to reach our validator)
 	}{
 		// YAML double-quoted escape \\ → literal backslash in parsed value
 		{"backslash", `"main\\evil"`},
@@ -419,32 +405,21 @@ func TestParse_BranchInjectionCharsRejected(t *testing.T) {
 		{"newline", `"main\nevil"`},
 		// unquoted dotdot traversal
 		{"dotdot", "../main"},
+		// path traversal with semicolons
+		{"semicolon traversal", `"../../etc/passwd; rm -rf /"`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			y := "version: v0.0.1\ndependencies:\n" +
 				"  actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:\n" +
-				"    branch: " + tc.yamlBranch + "\n" +
+				"    ref: " + tc.yamlRef + "\n" +
 				"    commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683\n" +
 				"    owner_id: 1\n    repo_id: 1\n"
 			_, err := Parse([]byte(y))
-			require.Error(t, err, "branch %q should be rejected", tc.yamlBranch)
+			require.Error(t, err, "ref %q should be rejected", tc.yamlRef)
 			assert.Contains(t, err.Error(), "unsafe characters")
 		})
 	}
-}
-
-func TestParse_TagInjectionCharsRejected(t *testing.T) {
-	// tag is optional but when present must not carry injection characters.
-	y := "version: v0.0.1\ndependencies:\n" +
-		"  actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:\n" +
-		"    branch: main\n" +
-		"    tag: \"../../etc/passwd; rm -rf /\"\n" +
-		"    commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683\n" +
-		"    owner_id: 1\n    repo_id: 1\n"
-	_, err := Parse([]byte(y))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unsafe characters")
 }
 
 func TestParse_OversizedInputRejected(t *testing.T) {
@@ -476,14 +451,12 @@ func TestParse_UsesCycleRejected(t *testing.T) {
 	yaml := `version: v0.0.1
 dependencies:
   actions/a@v1:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:
-    branch: main
     commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683
     owner_id: 1
     repo_id: 1
     uses:
       - actions/b@v1:sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   actions/b@v1:sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:
-    branch: main
     commit: sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     owner_id: 2
     repo_id: 2
@@ -499,7 +472,6 @@ func TestParse_UsesSelfCycleRejected(t *testing.T) {
 	yaml := `version: v0.0.1
 dependencies:
   actions/a@v1:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:
-    branch: main
     commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683
     owner_id: 1
     repo_id: 1
@@ -516,14 +488,12 @@ func TestParse_UsesAcyclicAccepted(t *testing.T) {
 	yaml := `version: v0.0.1
 dependencies:
   actions/a@v1:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:
-    branch: main
     commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683
     owner_id: 1
     repo_id: 1
     uses:
       - actions/b@v1:sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   actions/b@v1:sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:
-    branch: main
     commit: sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     owner_id: 2
     repo_id: 2
