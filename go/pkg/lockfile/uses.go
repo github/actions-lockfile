@@ -338,5 +338,5 @@ func isReusableWorkflow(path string) bool {
 // fetched from a specific checked-out path, while directories are run as
 // composite actions.
 func IsLocalReusableWorkflow(localUses string) bool {
-	return isYAMLFile(localUses)
+	return strings.HasPrefix(localUses, "./") && isYAMLFile(localUses)
 }

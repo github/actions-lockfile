@@ -147,9 +147,13 @@ func TestIsLocalReusableWorkflow(t *testing.T) {
 		{name: "local reusable yaml", input: "./.github/workflows/ci.yaml", want: true},
 		{name: "local composite action directory", input: "./my-action", want: false},
 		{name: "local composite no extension", input: "./my-action/", want: false},
+		{name: "missing ./ prefix yml", input: ".github/workflows/ci.yml", want: false},
+		{name: "missing ./ prefix bare file", input: "ci.yml", want: false},
 		{name: "remote action is not local", input: "actions/checkout@v4", want: false},
 		{name: "remote reusable workflow is not local", input: "octo/repo/.github/workflows/ci.yml@v1", want: false},
 		{name: "empty string", input: "", want: false},
+		{name: "yaml outside .github/workflows still true", input: "./scripts/run.yml", want: true},
+		{name: "local non-yaml extension", input: "./something.txt", want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
