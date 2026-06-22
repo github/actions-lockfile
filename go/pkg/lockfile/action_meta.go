@@ -30,20 +30,22 @@ type ActionMeta struct {
 // action.yml files in the wild are well under 1 MiB.
 const MaxActionMetaSize = 1 << 20 // 1 MiB
 
-// ParseActionMeta parses the contents of an action.yml file into an
-// ActionMeta. Composite actions emit their nested step `uses:` strings
-// in NestedUses; non-composite actions return an empty NestedUses.
+// ParseActionMeta parses the contents of an action.yml or action.yaml file
+// into an [ActionMeta]. Pass the raw file bytes as a string; the file name
+// itself is not needed. Composite actions emit their nested step `uses:`
+// strings in NestedUses; non-composite actions return an empty NestedUses.
 //
-// Returns an error only on malformed YAML — unknown `runs.using` values
-// resolve to ExecUnknown rather than failing.
+// Returns an error only on malformed YAML. Unknown `runs.using` values
+// (e.g. a future executor type) resolve to [ExecUnknown] rather than
+// failing, so callers can handle them gracefully.
 func ParseActionMeta(content string) (*ActionMeta, error) {
 	if len(content) > MaxActionMetaSize {
-		return nil, fmt.Errorf("action.yml too large: %d bytes (max %d)", len(content), MaxActionMetaSize)
+		return nil, fmt.Errorf("action metadata too large: %d bytes (max %d)", len(content), MaxActionMetaSize)
 	}
 
 	var doc yaml.Node
 	if err := yaml.Unmarshal([]byte(content), &doc); err != nil {
-		return nil, fmt.Errorf("parsing action.yml: %w", err)
+		return nil, fmt.Errorf("parsing action metadata: %w", err)
 	}
 
 	if err := rejectYAMLAnchors(&doc); err != nil {
@@ -61,7 +63,7 @@ func ParseActionMeta(content string) (*ActionMeta, error) {
 	}
 
 	if err := doc.Decode(&raw); err != nil {
-		return nil, fmt.Errorf("parsing action.yml: %w", err)
+		return nil, fmt.Errorf("parsing action metadata: %w", err)
 	}
 
 	meta := &ActionMeta{Name: raw.Name}

@@ -66,10 +66,19 @@ func IndexKey(owner, repo, ref string) string {
 //
 //	"OWNER/REPO@REF:ALGO-HEX"
 //
-// Returns ok=false if the string doesn't match the expected format,
-// including any sub-action path component (e.g. "owner/repo/sub@ref:...")
-// — the lockfile grammar is strictly repo-scoped, matching the runner's
-// tarball download identity.
+// Returns ok=false for any input that does not match — including all of:
+//   - Missing "@" separator between repo and ref
+//   - Missing ":" separator between ref and digest
+//   - A sub-action path in the repo portion (e.g. "owner/repo/sub@ref:...")
+//     — the lockfile grammar is strictly repo-scoped, matching the runner's
+//     tarball download identity
+//   - An unknown or unsupported digest algorithm (only "sha1" and "sha256"
+//     are recognized)
+//   - A hex digest that is the wrong length or contains non-hex characters
+//
+// On success, all case-insensitive components (owner, repo, algo, hex) are
+// normalized to lowercase. Ref preserves source casing — git refs are
+// case-sensitive. The returned Pin is always in canonical form.
 func ParsePin(s string) (Pin, bool) {
 	atIdx := strings.IndexByte(s, '@')
 	if atIdx <= 0 || atIdx == len(s)-1 {
