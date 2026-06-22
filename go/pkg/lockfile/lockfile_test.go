@@ -261,3 +261,273 @@ func mapKeys[V any](m map[string]V) []string {
 	}
 	return out
 }
+
+// ── Security hardening tests ──────────────────────────────────────────────────
+
+func TestParse_CommitEmptyStringRejected(t *testing.T) {
+	// commit:"" must be rejected: an empty commit SHA disables every downstream
+	// integrity check that reads Action.Commit, silently converting a
+	// required field into a no-op.
+	yaml := `version: v0.0.1
+dependencies:
+  actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:
+    branch: main
+    commit: ""
+    owner_id: 1
+    repo_id: 1
+`
+	_, err := Parse([]byte(yaml))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `"commit"`)
+	assert.Contains(t, err.Error(), "must not be empty")
+}
+
+func TestParse_CommitInvalidFormatRejected(t *testing.T) {
+	// A non-empty commit that isn't a valid algo-hex digest must be rejected.
+	// "notadigest", "sha1-", and "HEAD" look plausible but carry no integrity
+	// guarantee; consumers checking the algo and hex individually would silently
+	// accept them, defeating the lockfile's purpose.
+	cases := []struct {
+		name   string
+		commit string
+	}{
+		{"arbitrary string", "notadigest"},
+		{"no hex after dash", "sha1-"},
+		{"wrong length hex", "sha1-abc123"},
+		{"symbolic ref", "HEAD"},
+		{"sha1 prefix only", "sha1"},
+		{"non-hex chars", "sha1-zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			y := "version: v0.0.1\ndependencies:\n" +
+				"  actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:\n" +
+				"    branch: main\n" +
+				"    commit: " + tc.commit + "\n" +
+				"    owner_id: 1\n" +
+				"    repo_id: 1\n"
+			_, err := Parse([]byte(y))
+			require.Error(t, err, "commit %q should be rejected", tc.commit)
+			assert.Contains(t, err.Error(), "commit")
+		})
+	}
+}
+
+func TestParse_CommitValidFormatsAccepted(t *testing.T) {
+	cases := []string{
+		"sha1-11bd71901bbe5b1630ceea73d27597364c9af683",
+		"sha256-a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+	}
+	for _, commit := range cases {
+		t.Run(commit[:10], func(t *testing.T) {
+			pin := "actions/checkout@v4:" + commit
+			y := "version: v0.0.1\ndependencies:\n  " + pin + ":\n" +
+				"    branch: main\n    commit: " + commit + "\n    owner_id: 1\n    repo_id: 1\n"
+			_, err := Parse([]byte(y))
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestParse_CommitMismatchWithPinKeyRejected(t *testing.T) {
+	// The commit field in the action body must match the digest embedded in
+	// the pin key. A mismatch is a trust-confusion attack: a consumer that
+	// checks action.Commit trusts a different hash than the pin key they
+	// used to look up the action.
+	yaml := `version: v0.0.1
+dependencies:
+  actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:
+    branch: main
+    commit: sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    owner_id: 1
+    repo_id: 1
+`
+	_, err := Parse([]byte(yaml))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "disagrees with pin key digest")
+}
+
+func TestParse_CommitMatchingPinKeyAccepted(t *testing.T) {
+	// When commit matches the pin key digest, parse must succeed.
+	yaml := `version: v0.0.1
+dependencies:
+  actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:
+    branch: main
+    commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683
+    owner_id: 1
+    repo_id: 1
+`
+	_, err := Parse([]byte(yaml))
+	require.NoError(t, err)
+}
+
+func TestParse_WorkflowPathTraversalRejected(t *testing.T) {
+	// Workflow map keys are consumed as file paths by callers — accepting
+	// "../../../etc/passwd" or "/etc/shadow" as a key is an arbitrary read
+	// primitive for any consumer that calls os.Open(key).
+	cases := []struct {
+		name string
+		key  string
+	}{
+		{"parent traversal", "../../../etc/passwd"},
+		{"embedded traversal", ".github/../../../etc/passwd"},
+		{"absolute path", "/etc/shadow"},
+		{"double-dot segment", ".github/workflows/../../evil.yml"},
+		{"windows absolute", "C:/Windows/system.ini"},
+		{"backslash traversal", "..\\\\..\\\\secret"},
+		{"UNC path", "\\\\\\\\server\\\\share"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			y := "version: v0.0.1\ndependencies: {}\nworkflows:\n  " + tc.key + ": []\n"
+			_, err := Parse([]byte(y))
+			require.Error(t, err, "workflow key %q should be rejected", tc.key)
+			assert.Contains(t, err.Error(), "workflow path key")
+		})
+	}
+}
+
+func TestParse_WorkflowPathLegitimateKeysAccepted(t *testing.T) {
+	legit := []string{
+		".github/workflows/ci.yml",
+		".github/workflows/release.yaml",
+		"custom/path/workflow.yml",
+	}
+	for _, key := range legit {
+		t.Run(key, func(t *testing.T) {
+			y := "version: v0.0.1\ndependencies: {}\nworkflows:\n  " + key + ": []\n"
+			_, err := Parse([]byte(y))
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestParse_BranchInjectionCharsRejected(t *testing.T) {
+	// branch values are used in GraphQL queries, log output, and sometimes
+	// shell commands. Characters that survive YAML parsing but are unsafe
+	// for downstream interpolation (backslash, `..`, whitespace) must be
+	// rejected by our validator.
+	cases := []struct {
+		name       string
+		yamlBranch string // value as it appears in YAML (double-quoted to reach our validator)
+	}{
+		// YAML double-quoted escape \\ → literal backslash in parsed value
+		{"backslash", `"main\\evil"`},
+		// YAML double-quoted \t → literal tab
+		{"tab", `"main\tevil"`},
+		// YAML double-quoted \n → literal newline
+		{"newline", `"main\nevil"`},
+		// unquoted dotdot traversal
+		{"dotdot", "../main"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			y := "version: v0.0.1\ndependencies:\n" +
+				"  actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:\n" +
+				"    branch: " + tc.yamlBranch + "\n" +
+				"    commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683\n" +
+				"    owner_id: 1\n    repo_id: 1\n"
+			_, err := Parse([]byte(y))
+			require.Error(t, err, "branch %q should be rejected", tc.yamlBranch)
+			assert.Contains(t, err.Error(), "unsafe characters")
+		})
+	}
+}
+
+func TestParse_TagInjectionCharsRejected(t *testing.T) {
+	// tag is optional but when present must not carry injection characters.
+	y := "version: v0.0.1\ndependencies:\n" +
+		"  actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:\n" +
+		"    branch: main\n" +
+		"    tag: \"../../etc/passwd; rm -rf /\"\n" +
+		"    commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683\n" +
+		"    owner_id: 1\n    repo_id: 1\n"
+	_, err := Parse([]byte(y))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsafe characters")
+}
+
+func TestParse_OversizedInputRejected(t *testing.T) {
+	// An input larger than MaxParseSize must be rejected before any YAML
+	// parsing so that memory-exhaustion DoS from oversized documents is
+	// prevented at the library boundary.
+	oversized := make([]byte, MaxParseSize+1)
+	for i := range oversized {
+		oversized[i] = 'x'
+	}
+	_, err := Parse(oversized)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "too large")
+}
+
+func TestParse_ExactMaxSizeAccepted(t *testing.T) {
+	// A document at exactly MaxParseSize must not be size-rejected
+	// (it will fail for other reasons, but not the size check).
+	atMax := make([]byte, MaxParseSize)
+	for i := range atMax {
+		atMax[i] = 'x'
+	}
+	_, err := Parse(atMax)
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "too large")
+}
+
+func TestParse_UsesCycleRejected(t *testing.T) {
+	yaml := `version: v0.0.1
+dependencies:
+  actions/a@v1:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:
+    branch: main
+    commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683
+    owner_id: 1
+    repo_id: 1
+    uses:
+      - actions/b@v1:sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  actions/b@v1:sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:
+    branch: main
+    commit: sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    owner_id: 2
+    repo_id: 2
+    uses:
+      - actions/a@v1:sha1-11bd71901bbe5b1630ceea73d27597364c9af683
+`
+	_, err := Parse([]byte(yaml))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cycle")
+}
+
+func TestParse_UsesSelfCycleRejected(t *testing.T) {
+	yaml := `version: v0.0.1
+dependencies:
+  actions/a@v1:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:
+    branch: main
+    commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683
+    owner_id: 1
+    repo_id: 1
+    uses:
+      - actions/a@v1:sha1-11bd71901bbe5b1630ceea73d27597364c9af683
+`
+	_, err := Parse([]byte(yaml))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cycle")
+}
+
+func TestParse_UsesAcyclicAccepted(t *testing.T) {
+	// A valid DAG (A uses B, B has no uses) must parse successfully.
+	yaml := `version: v0.0.1
+dependencies:
+  actions/a@v1:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:
+    branch: main
+    commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683
+    owner_id: 1
+    repo_id: 1
+    uses:
+      - actions/b@v1:sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  actions/b@v1:sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:
+    branch: main
+    commit: sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    owner_id: 2
+    repo_id: 2
+`
+	_, err := Parse([]byte(yaml))
+	require.NoError(t, err)
+}

@@ -98,6 +98,14 @@ func ParsePin(s string) (Pin, bool) {
 	if strings.ContainsRune(ref, ':') {
 		return Pin{}, false
 	}
+	// Validate the ref with the same denylist used by ParseActionRef to
+	// reject shell metacharacters, whitespace, and traversal sequences.
+	// This does NOT make the ref safe for verbatim interpolation into URLs
+	// or shell commands -- callers must still escape appropriately for their
+	// context. The goal is to reject obviously-malicious refs at parse time.
+	if !isValidRef(ref) {
+		return Pin{}, false
+	}
 	hashSpec := refHash[colonIdx+1:]
 
 	dashIdx := strings.IndexByte(hashSpec, '-')
