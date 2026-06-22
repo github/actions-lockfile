@@ -334,8 +334,13 @@ func Parse(contents []byte, paths ...string) (File, error) {
 }
 
 // detectUsesCycle reports a cycle in the action uses graph using
-// iterative DFS with three-colour marking. It returns the key of the node
+// recursive DFS with three-colour marking. It returns the key of the node
 // that forms the back-edge, or ("", nil) when the graph is acyclic.
+//
+// The recursion depth is bounded by the number of unique keys in
+// f.Dependencies, which is itself bounded by MaxParseSize (a 1 MiB file
+// can hold at most ~5,000 dependency entries). Go's default goroutine stack
+// grows dynamically up to 1 GB, so 5,000 frames is well within budget.
 //
 // The runner rejects cycles at execution time via CompositeActionsMaxDepth
 // (actions/runner: src/Runner.Common/Constants.cs). Detecting them at parse
@@ -422,6 +427,12 @@ func checkWorkflowPathKey(p string) error {
 	for _, c := range p {
 		if c <= 0x1F || c == 0x7F {
 			return fmt.Errorf("workflow path key contains control characters: %q", p)
+		}
+		// Reject backslash and colon to prevent Windows-style absolute paths
+		// (e.g. "C:\..." or UNC "\\server\...") and backslash-based traversal
+		// (e.g. "..\\..\\.." ) from bypassing the forward-slash checks above.
+		if c == '\\' || c == ':' {
+			return fmt.Errorf("workflow path key contains invalid character %q: %q", string(c), p)
 		}
 	}
 	for _, seg := range strings.Split(p, "/") {

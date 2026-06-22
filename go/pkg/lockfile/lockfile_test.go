@@ -373,6 +373,9 @@ func TestParse_WorkflowPathTraversalRejected(t *testing.T) {
 		{"embedded traversal", ".github/../../../etc/passwd"},
 		{"absolute path", "/etc/shadow"},
 		{"double-dot segment", ".github/workflows/../../evil.yml"},
+		{"windows absolute", "C:/Windows/system.ini"},
+		{"backslash traversal", "..\\\\..\\\\secret"},
+		{"UNC path", "\\\\\\\\server\\\\share"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
