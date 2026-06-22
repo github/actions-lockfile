@@ -318,10 +318,25 @@ func isReusableWorkflow(path string) bool {
 	return isYAMLFile(name)
 }
 
-// IsLocalReusableWorkflow reports whether a `./...`-prefixed local
-// `uses:` value names a reusable workflow file (rather than a local
-// composite action directory). Exposed for consumers that walk
-// workflows themselves and need to distinguish the two shapes.
-func IsLocalReusableWorkflow(localPath string) bool {
-	return isYAMLFile(localPath)
+// IsLocalReusableWorkflow reports whether a local `uses:` value (one that
+// starts with "./") names a reusable workflow file rather than a composite
+// action directory.
+//
+// Pass the raw, untrimmed `uses:` string from the workflow step — the leading
+// "./" must be present:
+//
+//   - "./.github/workflows/ci.yml"  → true  (local reusable workflow)
+//   - "./my-composite-action"       → false (local composite action)
+//
+// Call this only after confirming the `uses:` value has a "./" prefix; a
+// value without "./" is a repository action or reusable workflow, not a
+// local reference, and should be parsed with [ParseActionRef] or
+// [ParseReusableWorkflowRef] instead.
+//
+// The distinction matters because composite action directories and reusable
+// workflow files are resolved differently by the runner: workflow files are
+// fetched from a specific checked-out path, while directories are run as
+// composite actions.
+func IsLocalReusableWorkflow(localUses string) bool {
+	return strings.HasPrefix(localUses, "./") && isYAMLFile(localUses)
 }

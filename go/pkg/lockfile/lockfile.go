@@ -16,22 +16,21 @@ import (
 // scraping the error string.
 var ErrFutureVersion = errors.New("lockfile version is newer than this binary supports")
 
-// ParseError describes a failure to parse a dependency lockfile.
+// ParseError describes a failure to parse a dependency lockfile. It is always
+// returned (via errors.As) by [Parse] rather than plain errors, so callers can
+// print file:line:col diagnostics without scraping error strings.
 //
 // Line and Column, when non-zero, are the 1-indexed position within the
-// lockfile contents that the failure refers to. They index the lockfile
-// itself, never a consumer's workflow file, so callers can anchor diagnostics
-// on the lockfile (.github/workflows/actions.lock) rather than scraping
-// yaml.v3's error string themselves.
+// lockfile bytes that the failure refers to. They index the lockfile file
+// (.github/workflows/actions.lock), not any workflow .yml file.
 //
-// Column is populated for semantic failures Parse detects itself (it walks the
-// retained YAML node tree to the offending key/value). It is left zero for raw
-// yaml.v3 decode failures, whose errors report only a line: a malformed
-// document has no node tree to read a column from, and yaml.v3 type errors
-// carry a line but no column.
+// Column is set for semantic failures that Parse detects by walking the
+// retained YAML tree (e.g. an unknown field, a duplicate pin key). It is zero
+// for low-level YAML syntax errors where only a line number is available —
+// a structurally malformed document has no node tree to resolve a column from.
 //
-// Msg is the human-readable reason with yaml.v3's "yaml:" package prefix and
-// leading position removed.
+// Msg is the human-readable description of the failure, without any position
+// prefix. Use Error() to get the full "line N, column M: reason" string.
 type ParseError struct {
 	Line   int
 	Column int
@@ -110,9 +109,24 @@ const Path = ".github/workflows/actions.lock"
 // Workflow entries hold the full transitive closure as a flat list of pin
 // keys for cold readability.
 type File struct {
-	Version      string              `yaml:"version"`
-	Dependencies map[string]Action   `yaml:"dependencies"`
-	Workflows    map[string][]string `yaml:"workflows"`
+	// Version is the lockfile schema version string (e.g. "v0.0.1"). It is
+	// always equal to the [Version] constant for files Parse accepts.
+	Version string `yaml:"version"`
+
+	// Dependencies maps each canonical pin key (OWNER/REPO@REF:ALGO-HEX) to
+	// the resolved [Action] metadata for that pin. The map is deduplicated:
+	// multiple workflows that share an action produce a single entry here.
+	// Use [File.LookupWorkflow] to find the pin keys for a specific workflow,
+	// then index into this map to retrieve each action's metadata.
+	Dependencies map[string]Action `yaml:"dependencies"`
+
+	// Workflows maps each repo-relative workflow file path (e.g.
+	// ".github/workflows/release.yml") to the flat, transitive list of
+	// canonical pin keys that workflow depends on. Pin keys are in
+	// OWNER/REPO@REF:ALGO-HEX form and serve as lookup keys into
+	// Dependencies. Prefer [File.LookupWorkflow] over indexing this
+	// map directly.
+	Workflows map[string][]string `yaml:"workflows"`
 
 	// node retains the parsed YAML tree so callers can resolve positions for
 	// their own diagnostics via Position/KeyPosition. It is nil on the
@@ -203,9 +217,23 @@ func mappingEntry(m *yaml.Node, key string) (k, v *yaml.Node) {
 	return nil, nil
 }
 
-// LookupWorkflow returns the dependency closure for the given repo-relative
-// workflow key (e.g. ".github/workflows/deploy.yml"). The returned bool
-// reports whether the key was found.
+// LookupWorkflow returns the flat, transitive list of canonical pin keys for
+// the given repo-relative workflow path (e.g. ".github/workflows/deploy.yml").
+// The returned bool reports whether the workflow path was found in the lockfile.
+//
+// Each string in the returned slice is a canonical pin key in
+// OWNER/REPO@REF:ALGO-HEX form. To retrieve the full action metadata for a
+// pin, look it up in File.Dependencies:
+//
+//	pins, ok := f.LookupWorkflow(".github/workflows/deploy.yml")
+//	for _, key := range pins {
+//	    action := f.Dependencies[key]
+//	    fmt.Println(action.Branch, action.Commit)
+//	}
+//
+// A workflow that is present in the lockfile but has no dependencies returns
+// an empty slice and ok=true. ok=false means the workflow path was never
+// onboarded into the lockfile at all.
 func (f File) LookupWorkflow(workflowKey string) ([]string, bool) {
 	w, ok := f.Workflows[workflowKey]
 	return w, ok
@@ -214,19 +242,28 @@ func (f File) LookupWorkflow(workflowKey string) ([]string, bool) {
 // Action carries the per-action metadata recorded in the lockfile under the
 // pin key.
 //
-// Tag is the discovered release/tag at the commit, if one exists. Optional.
+// Tag is the release/tag name at the pinned commit, if one exists. Optional:
+// commits that are not tagged (e.g. pinned directly to a branch SHA) omit
+// this field.
 //
-// Branch is a branch that contains the pinned commit. Required: a commit not
-// on any branch is an impostor / fork-network signal, so Parse rejects an
-// Action without one. It is the authenticity check that SHA-only pinning
-// lacks.
+// Branch is a branch of the action's repository that contains the pinned
+// commit. Required: Parse rejects an Action without one. A valid branch
+// confirms that the commit exists in the expected repository — a SHA that
+// isn't reachable from any branch in the source repo could belong to a fork
+// or an attacker-supplied commit, which SHA-only pinning cannot detect.
 //
-// Commit holds the digest in algo-prefixed form (e.g. "sha1-..." or
-// "sha256-..."). Required.
+// Commit holds the digest in algo-prefixed form (e.g. "sha1-abc123..." or
+// "sha256-def456..."). This is the same digest that appears in the pin key.
+// Required.
+//
+// OwnerID and RepoID are the GitHub numeric IDs for the action's repository
+// owner and repository respectively. Consumers use them to detect if the
+// action has been transferred to a new owner between lockfile regenerations —
+// a repository transfer changes the owner name but not the owner ID.
 //
 // Uses lists the action's direct nested dependencies (composite action
-// `uses:` steps) as canonical pin keys. Empty for leaf actions; required for
-// composites, a condition Parse can't enforce structurally.
+// `uses:` steps) as canonical pin keys. Empty for leaf actions (node,
+// docker); populated for composite actions.
 type Action struct {
 	Tag     string   `yaml:"tag,omitempty"`
 	Branch  string   `yaml:"branch,omitempty"`
@@ -236,36 +273,49 @@ type Action struct {
 	Uses    []string `yaml:"uses,omitempty"`
 }
 
-// Parse unmarshals YAML lockfile contents and verifies the version is
-// supported. It enforces structural validity — unknown top-level keys are
-// rejected and required fields must be present — but does not validate pin
-// integrity (e.g. whether a SHA actually matches the ref) or action
-// existence. That belongs to the consumer (e.g. gh-actions-lock's check
-// command).
+// Parse unmarshals the raw bytes of a lockfile and returns the parsed [File].
+// Pass the contents of .github/workflows/actions.lock (available as the
+// [Path] constant) or any other lockfile source.
 //
-// The optional paths parameter scopes per-dependency validation to only the
-// entries referenced by the named workflow paths (via f.Workflows[p]).
+// Parse checks structural validity — unknown top-level keys are rejected
+// and required [Action] fields must be present — but does not verify pin
+// integrity (e.g. that a SHA matches the ref) or that actions exist on
+// GitHub. Those checks belong to the caller (e.g. the check command in
+// gh-actions-lock).
+//
 // MaxParseSize is the maximum number of bytes Parse will accept. Inputs larger
 // than this are rejected before any YAML parsing takes place to prevent
 // memory-exhaustion DoS from oversized or yaml-bomb documents.
 const MaxParseSize = 1 << 20 // 1 MiB
-
-// When paths is empty, every dependency entry is validated — the default for
-// whole-file tooling (CLI regen, Dependabot). When paths is non-empty, a
-// dependency entry outside the referenced set is left unchecked so one
-// corrupt entry doesn't fail unrelated workflows that share the lockfile.
-// A requested path absent from f.Workflows contributes zero entries and
-// validates nothing — fail-open by design for workflows not yet onboarded.
 //
-// Document-level invariants (version required/supported, unknown top-level
-// keys) always run regardless of paths.
+// # Optional paths parameter
 //
-// Action map keys and workflow dependency entries are canonicalized via
-// ParsePin so downstream lookups by canonical key (e.g. pin.String()) match
-// regardless of the source casing of owner/repo/algo/hex in the YAML.
-// Entries that do not parse as a valid pin are left untouched; consumers
-// can flag them via diagnostics. Workflow path keys are NOT canonicalized
-// — filesystem paths are case-sensitive on the platforms we run on.
+// The variadic paths parameter is optional. Most callers should omit it.
+//
+//   - Omit paths (or pass nil) to validate every dependency entry in the
+//     lockfile. This is the right choice for whole-file tooling: CLI
+//     regeneration, Dependabot, schema linters.
+//
+//   - Pass one or more repo-relative workflow file paths (e.g.
+//     ".github/workflows/deploy.yml") to limit field validation to only the
+//     dependency entries referenced by those workflows. Entries outside the
+//     requested set are still parsed and returned, but required-field checks
+//     are skipped for them. This lets a single corrupt unrelated entry fail
+//     without blocking the workflows you actually care about.
+//
+// A path that does not appear in the lockfile's workflows map silently
+// contributes zero entries to validate — the lockfile is returned as-is for
+// that path. This is intentional: a workflow not yet onboarded into the
+// lockfile should not cause Parse to fail.
+//
+// # Canonicalization
+//
+// Action map keys and workflow dependency entries are lowercased via
+// [ParsePin] so that lookups by [Pin.String] succeed regardless of the
+// source casing of owner, repo, algorithm, or hex in the YAML. Entries
+// that are not valid pin strings are preserved verbatim for caller
+// diagnostics. Workflow path keys are NOT canonicalized — file paths are
+// case-sensitive on Linux.
 func Parse(contents []byte, paths ...string) (File, error) {
 	if len(contents) > MaxParseSize {
 		return File{}, &ParseError{
