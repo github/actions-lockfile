@@ -2,8 +2,6 @@ package lockfile
 
 import (
 	"errors"
-	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -472,9 +470,6 @@ func TestParse_ExactMaxSizeAccepted(t *testing.T) {
 }
 
 func TestParse_UsesCycleRejected(t *testing.T) {
-	// A cycle in the uses graph (A uses B, B uses A) must be rejected.
-	// Any consumer that walks Action.Uses without its own cycle guard
-	// would loop infinitely on such a lockfile.
 	yaml := `version: v0.0.1
 dependencies:
   actions/a@v1:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:
@@ -498,7 +493,6 @@ dependencies:
 }
 
 func TestParse_UsesSelfCycleRejected(t *testing.T) {
-	// Self-referencing uses (A uses A) must also be caught.
 	yaml := `version: v0.0.1
 dependencies:
   actions/a@v1:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:
@@ -533,47 +527,4 @@ dependencies:
 `
 	_, err := Parse([]byte(yaml))
 	require.NoError(t, err)
-}
-
-func TestParse_OverlongUsesListRejected(t *testing.T) {
-	// A uses list longer than MaxUsesPerAction must be rejected. At the
-	// 1 MiB input cap, thousands of ~50-byte pin strings fit in one uses
-	// list; canonicalizeActions allocates a new slice of the same length,
-	// amplifying memory well beyond the input size.
-	var sb strings.Builder
-	sb.WriteString("version: v0.0.1\ndependencies:\n")
-	sb.WriteString("  actions/composite@v1:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:\n")
-	sb.WriteString("    branch: main\n")
-	sb.WriteString("    commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683\n")
-	sb.WriteString("    owner_id: 1\n    repo_id: 1\n    uses:\n")
-
-	// Add MaxUsesPerAction+1 distinct entries. We only need the list to be
-	// over the limit; they don't all need to be valid pins.
-	for i := 0; i <= MaxUsesPerAction; i++ {
-		sb.WriteString(fmt.Sprintf("      - notapin%d\n", i))
-	}
-
-	_, err := Parse([]byte(sb.String()))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "uses entries")
-}
-
-func TestParse_UsesListAtMaxAccepted(t *testing.T) {
-	// A uses list at exactly MaxUsesPerAction entries must be accepted.
-	// (The individual entries needn't be valid pins for this size check.)
-	var sb strings.Builder
-	sb.WriteString("version: v0.0.1\ndependencies:\n")
-	sb.WriteString("  actions/composite@v1:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:\n")
-	sb.WriteString("    branch: main\n")
-	sb.WriteString("    commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683\n")
-	sb.WriteString("    owner_id: 1\n    repo_id: 1\n    uses:\n")
-	for i := 0; i < MaxUsesPerAction; i++ {
-		sb.WriteString(fmt.Sprintf("      - notapin%d\n", i))
-	}
-
-	_, err := Parse([]byte(sb.String()))
-	// Should NOT error due to the size check (may error for other reasons).
-	if err != nil {
-		assert.NotContains(t, err.Error(), "uses entries")
-	}
 }

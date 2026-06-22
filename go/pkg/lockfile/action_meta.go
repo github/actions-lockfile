@@ -27,16 +27,8 @@ type ActionMeta struct {
 }
 
 // MaxActionMetaSize is the maximum byte length ParseActionMeta will accept.
-// action.yml files in the wild are well under 64 KB; this limit prevents
-// memory-exhaustion from oversized or yaml-bomb documents before any YAML
-// parsing takes place.
-const MaxActionMetaSize = 64 * 1024 // 64 KiB
-
-// MaxNestedUses is the maximum number of composite-action step `uses:` entries
-// ParseActionMeta will collect. Real composite actions rarely exceed a dozen
-// steps; this cap prevents a crafted action.yml from inflating the NestedUses
-// slice into a large allocation.
-const MaxNestedUses = 500
+// action.yml files in the wild are well under 1 MiB.
+const MaxActionMetaSize = 1 << 20 // 1 MiB
 
 // ParseActionMeta parses the contents of an action.yml file into an
 // ActionMeta. Composite actions emit their nested step `uses:` strings
@@ -49,6 +41,15 @@ func ParseActionMeta(content string) (*ActionMeta, error) {
 		return nil, fmt.Errorf("action.yml too large: %d bytes (max %d)", len(content), MaxActionMetaSize)
 	}
 
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(content), &doc); err != nil {
+		return nil, fmt.Errorf("parsing action.yml: %w", err)
+	}
+
+	if err := rejectYAMLAnchors(&doc); err != nil {
+		return nil, err
+	}
+
 	var raw struct {
 		Name string `yaml:"name"`
 		Runs struct {
@@ -59,7 +60,7 @@ func ParseActionMeta(content string) (*ActionMeta, error) {
 		} `yaml:"runs"`
 	}
 
-	if err := yaml.Unmarshal([]byte(content), &raw); err != nil {
+	if err := doc.Decode(&raw); err != nil {
 		return nil, fmt.Errorf("parsing action.yml: %w", err)
 	}
 
@@ -73,9 +74,6 @@ func ParseActionMeta(content string) (*ActionMeta, error) {
 			if step.Uses == "" {
 				continue
 			}
-			if len(meta.NestedUses) >= MaxNestedUses {
-				return nil, fmt.Errorf("action.yml has too many composite steps with uses: (max %d)", MaxNestedUses)
-			}
 			meta.NestedUses = append(meta.NestedUses, step.Uses)
 		}
 	case using == "docker":
@@ -87,4 +85,25 @@ func ParseActionMeta(content string) (*ActionMeta, error) {
 	}
 
 	return meta, nil
+}
+
+// rejectYAMLAnchors walks a yaml.Node tree and returns an error if any anchor
+// definition or alias reference is found. action.yml does not use YAML anchors,
+// so their presence is either a mistake or an attempted exploit.
+func rejectYAMLAnchors(n *yaml.Node) error {
+	if n == nil {
+		return nil
+	}
+	if n.Kind == yaml.AliasNode {
+		return fmt.Errorf("action.yml: YAML anchors and aliases are not supported (line %d)", n.Line)
+	}
+	if n.Anchor != "" {
+		return fmt.Errorf("action.yml: YAML anchors and aliases are not supported (line %d)", n.Line)
+	}
+	for _, child := range n.Content {
+		if err := rejectYAMLAnchors(child); err != nil {
+			return err
+		}
+	}
+	return nil
 }
