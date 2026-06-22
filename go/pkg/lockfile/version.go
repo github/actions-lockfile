@@ -24,24 +24,6 @@ import (
 // wild. x/mod/semver rejects bare and partial tags, and doesn't expose
 // individual components — we need Major/Minor/Patch to compute
 // MajorTag, MinorTag, and IsFull for the tag recommendation engine.
-// SemVer holds parsed semantic version components.
-//
-// API stability: the type and its comparison helpers (Greater, Narrows,
-// UpgradeOver, MajorTag, MinorTag, IsFull) are part of the exported surface
-// because the tag recommendation engine in downstream consumers relies on
-// them. Their semantics are deliberately non-strict-semver (see below) and are
-// committed to as-is; they are not internal helpers despite the
-// recommendation-engine flavor.
-//
-// GitHub Actions has no first-class version scheme — a uses: ref can be
-// any git ref (tag, branch, SHA, or even "main"). In practice most
-// action authors follow semver-ish conventions, but the ecosystem
-// diverges from strict semver in ways that golang.org/x/mod/semver
-// cannot handle: bare versions without a "v" prefix ("2.0.0"), partial
-// versions ("v4", "v4.2"), and arbitrary suffixes all appear in the
-// wild. x/mod/semver rejects bare and partial tags, and doesn't expose
-// individual components — we need Major/Minor/Patch to compute
-// MajorTag, MinorTag, and IsFull for the tag recommendation engine.
 type SemVer struct {
 	Prefix string // "v" or "" — whether the original tag had a "v" prefix
 	Major  int
