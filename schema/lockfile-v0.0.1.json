@@ -35,11 +35,12 @@
       "description": "Resolved metadata for a single pinned action.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["commit", "owner_id", "repo_id"],
+      "required": ["ref", "commit", "owner_id", "repo_id"],
       "properties": {
         "ref": {
-          "description": "The git ref (tag or branch) the commit was resolved from, if known. Optional: not every pinned commit has a symbolic ref recorded.",
-          "type": "string"
+          "description": "The git ref the commit was resolved from. Required: every dep that passes impostor checks has a resolvable ref. The CLI picks the best ref with priority: full semver tag > any tag > branch (protected > default > release/v* > any). The parser enforces presence; priority ordering is the CLI's concern.",
+          "type": "string",
+          "minLength": 1
         },
         "commit": {
           "description": "The exact commit the action resolves to, in algo-prefixed digest form (e.g. sha1-...). This is the immutable identity the runner checks out; tags and branches can be moved, this cannot.",

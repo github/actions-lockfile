@@ -242,8 +242,12 @@ func (f File) LookupWorkflow(workflowKey string) ([]string, bool) {
 // Action carries the per-action metadata recorded in the lockfile under the
 // pin key.
 //
-// Ref is the git ref (tag or branch) the commit was resolved from, if known.
-// Optional: not every pinned commit has a symbolic ref recorded.
+// Ref is the git ref the commit was resolved from. Required: every dep that
+// passes impostor checks has a resolvable ref. The CLI picks the best ref
+// with this priority: full semver tag (e.g. v4.3.1) > any tag (including
+// major-only like v4) > branch (protected > default > release/v* or
+// releases/v* > any). The parser enforces presence and non-emptiness but
+// not the priority ordering — that's the CLI's concern.
 //
 // Commit holds the digest in algo-prefixed form (e.g. "sha1-abc123..." or
 // "sha256-def456..."). This is the same digest that appears in the pin key.
@@ -505,10 +509,9 @@ var allowedActionKeys = map[string]struct{}{
 
 // requiredActionKeys lists the keys every dependency's Action mapping must
 // carry, in report order. It mirrors the $defs/action "required" list in
-// lockfile-v0.0.1.json. `ref` is optional (not every commit has a symbolic
-// ref recorded) and `uses` is required only for composite actions — a
-// condition the lockfile alone can't express — so neither appears here.
-var requiredActionKeys = []string{"commit", "owner_id", "repo_id"}
+// lockfile-v0.0.1.json. `uses` is required only for composite actions — a
+// condition the lockfile alone can't express — so it doesn't appear here.
+var requiredActionKeys = []string{"ref", "commit", "owner_id", "repo_id"}
 
 // validateKnownFields enforces the schema's additionalProperties:false and
 // required rules on the lockfile's fixed-shape mappings — the document root and
@@ -599,6 +602,7 @@ func validateKnownFields(f *File, paths []string) *ParseError {
 
 // nonEmptyStringKeys lists action fields that must be non-empty strings.
 var nonEmptyStringKeys = map[string]struct{}{
+	"ref":    {},
 	"commit": {},
 }
 
