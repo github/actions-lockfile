@@ -11,12 +11,24 @@ import (
 )
 
 func TestSchema_EmbeddedMatchesRootInvariant(t *testing.T) {
-	rootSchema, err := os.ReadFile("../../../schema/lockfile-v0.0.1.json")
-	if errors.Is(err, os.ErrNotExist) {
-		t.Skip("root schema invariant is not present in this module checkout")
+	for _, ver := range []struct {
+		version string
+		file    string
+	}{
+		{"v0.0.1", "../../../schema/lockfile-v0.0.1.json"},
+		{"v0.0.2", "../../../schema/lockfile-v0.0.2.json"},
+	} {
+		t.Run(ver.version, func(t *testing.T) {
+			rootSchema, err := os.ReadFile(ver.file)
+			if errors.Is(err, os.ErrNotExist) {
+				t.Skip("root schema invariant is not present in this module checkout")
+			}
+			require.NoError(t, err)
+			embedded, ok := SchemaForVersion(ver.version)
+			require.True(t, ok, "SchemaForVersion(%q) returned false", ver.version)
+			assert.JSONEq(t, string(rootSchema), embedded)
+		})
 	}
-	require.NoError(t, err)
-	assert.JSONEq(t, string(rootSchema), Schema())
 }
 
 // TestSchema_EmbeddedMatchesEnforcement guards against drift between the
@@ -64,7 +76,7 @@ func TestSchema_EmbeddedMatchesEnforcement(t *testing.T) {
 }
 
 func TestParse_UnknownTopLevelFieldRejected(t *testing.T) {
-	yaml := `version: v0.0.1
+	yaml := `version: v0.0.2
 dependencies: {}
 typo_section: {}
 `
@@ -79,7 +91,7 @@ typo_section: {}
 }
 
 func TestParse_UnknownActionFieldRejected(t *testing.T) {
-	yaml := `version: v0.0.1
+	yaml := `version: v0.0.2
 dependencies:
   actions/checkout@v4:
     owner_id: 1
@@ -99,7 +111,7 @@ dependencies:
 
 func TestParse_MissingRequiredActionFieldRejected(t *testing.T) {
 	// commit/owner_id/repo_id present, but ref (required) is absent.
-	yaml := `version: v0.0.1
+	yaml := `version: v0.0.2
 dependencies:
   actions/checkout@v4:
     commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
@@ -118,7 +130,7 @@ dependencies:
 }
 
 func TestParse_EmptyCommitRejected(t *testing.T) {
-	yaml := `version: v0.0.1
+	yaml := `version: v0.0.2
 dependencies:
   actions/checkout@v4:
     ref: v4
@@ -136,7 +148,7 @@ dependencies:
 }
 
 func TestParse_ZeroOwnerIDRejected(t *testing.T) {
-	yaml := `version: v0.0.1
+	yaml := `version: v0.0.2
 dependencies:
   actions/checkout@v4:
     ref: v4
@@ -154,7 +166,7 @@ dependencies:
 }
 
 func TestParse_ZeroRepoIDRejected(t *testing.T) {
-	yaml := `version: v0.0.1
+	yaml := `version: v0.0.2
 dependencies:
   actions/checkout@v4:
     ref: v4
@@ -172,7 +184,7 @@ dependencies:
 }
 
 func TestParse_NegativeIDRejected(t *testing.T) {
-	yaml := `version: v0.0.1
+	yaml := `version: v0.0.2
 dependencies:
   actions/checkout@v4:
     ref: v4
@@ -190,7 +202,7 @@ dependencies:
 }
 
 func TestParse_KnownFieldsAccepted(t *testing.T) {
-	yaml := `version: v0.0.1
+	yaml := `version: v0.0.2
 workflows:
   .github/workflows/ci.yml:
     - actions/checkout@v4
@@ -217,7 +229,7 @@ const (
 	goodPin    = "actions/checkout@v4"
 	corruptPin = "actions/setup-go@v5"
 
-	corruptLockfile = `version: v0.0.1
+	corruptLockfile = `version: v0.0.2
 workflows:
   .github/workflows/a.yml:
     - actions/checkout@v4
@@ -278,7 +290,7 @@ func TestParse_ScopedValidation_GoodAndCorruptPaths_Errors(t *testing.T) {
 }
 
 func TestParse_ScopedValidation_UnknownActionField_InScope_Errors(t *testing.T) {
-	data := `version: v0.0.1
+	data := `version: v0.0.2
 workflows:
   .github/workflows/a.yml:
     - actions/checkout@v4
@@ -299,7 +311,7 @@ dependencies:
 }
 
 func TestParse_ScopedValidation_UnknownActionField_OutOfScope_OK(t *testing.T) {
-	data := `version: v0.0.1
+	data := `version: v0.0.2
 workflows:
   .github/workflows/b.yml:
     - actions/checkout@v4
@@ -317,7 +329,7 @@ dependencies:
 }
 
 func TestParse_ScopedValidation_ZeroValue_InScope_Errors(t *testing.T) {
-	data := `version: v0.0.1
+	data := `version: v0.0.2
 workflows:
   .github/workflows/a.yml:
     - actions/checkout@v4
@@ -338,7 +350,7 @@ dependencies:
 }
 
 func TestParse_ScopedValidation_ZeroValue_OutOfScope_OK(t *testing.T) {
-	data := `version: v0.0.1
+	data := `version: v0.0.2
 workflows:
   .github/workflows/a.yml:
     - actions/checkout@v4
@@ -355,7 +367,7 @@ dependencies:
 }
 
 func TestParse_ScopedValidation_UnknownTopLevel_StillErrors(t *testing.T) {
-	data := `version: v0.0.1
+	data := `version: v0.0.2
 typo_section: {}
 dependencies: {}
 `

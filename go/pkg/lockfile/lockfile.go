@@ -80,8 +80,8 @@ func newYAMLParseError(err error) *ParseError {
 	}
 }
 
-// Version is the only supported lockfile schema version.
-const Version = "v0.0.1"
+// Version is the latest lockfile schema version this binary writes.
+const Version = "v0.0.2"
 
 // Path is the canonical repo-relative location of the dependency lockfile.
 const Path = ".github/workflows/actions.lock"
@@ -221,7 +221,7 @@ func mappingEntry(m *yaml.Node, key string) (k, v *yaml.Node) {
 // The returned bool reports whether the workflow path was found in the lockfile.
 //
 // Each string in the returned slice is a canonical pin key in
-// OWNER/REPO@REF:ALGO-HEX form. To retrieve the full action metadata for a
+// OWNER/REPO@REF form. To retrieve the full action metadata for a
 // pin, look it up in File.Dependencies:
 //
 //	pins, ok := f.LookupWorkflow(".github/workflows/deploy.yml")
@@ -312,76 +312,7 @@ const MaxParseSize = 1 << 20 // 1 MiB
 // diagnostics. Workflow path keys are NOT canonicalized — file paths are
 // case-sensitive on Linux.
 func Parse(contents []byte, paths ...string) (File, error) {
-	if len(contents) > MaxParseSize {
-		return File{}, &ParseError{
-			Msg: fmt.Sprintf("lockfile too large: %d bytes (max %d)", len(contents), MaxParseSize),
-		}
-	}
-	var root yaml.Node
-	if err := yaml.Unmarshal(contents, &root); err != nil {
-		return File{}, newYAMLParseError(err)
-	}
-	var f File
-	if err := root.Decode(&f); err != nil {
-		return File{}, newYAMLParseError(err)
-	}
-	// Retain the tree so semantic errors below (and consumers) can resolve
-	// precise line+column positions within the lockfile.
-	f.node = &root
-
-	if f.Version == "" {
-		// No version node to point at; anchor at the top of the document.
-		pe := &ParseError{Msg: "dependency lockfile version is required"}
-		if m := docMapping(f.node); m != nil {
-			pe.Line, pe.Column = m.Line, m.Column
-		}
-		return File{}, pe
-	}
-	if f.Version != Version {
-		msg := fmt.Sprintf("unsupported dependency lockfile version %q", f.Version)
-		var wrapped error
-		if isFutureVersion(f.Version, Version) {
-			msg = fmt.Sprintf(
-				"lockfile version %s is newer than this binary supports (%s); "+
-					"upgrade the tool that reads this lockfile to a build that supports %s",
-				f.Version, Version, f.Version,
-			)
-			wrapped = ErrFutureVersion
-		}
-		pe := &ParseError{Msg: msg, err: wrapped}
-		if l, c, ok := f.Position("version"); ok {
-			pe.Line, pe.Column = l, c
-		}
-		return File{}, pe
-	}
-	if pe := validateKnownFields(&f, paths); pe != nil {
-		return File{}, pe
-	}
-	if pe := validateWorkflowPaths(&f); pe != nil {
-		return File{}, pe
-	}
-	if conflictKey, err := canonicalizeActions(&f); err != nil {
-		pe := &ParseError{Msg: err.Error(), err: err}
-		if l, c, ok := f.KeyPosition("dependencies", conflictKey); ok {
-			pe.Line, pe.Column = l, c
-		}
-		return File{}, pe
-	}
-	if wfPath, _, err := canonicalizeWorkflowDependencies(&f); err != nil {
-		pe := &ParseError{Msg: err.Error(), err: err}
-		if l, c, ok := f.KeyPosition("workflows", wfPath); ok {
-			pe.Line, pe.Column = l, c
-		}
-		return File{}, pe
-	}
-	if cycle, err := detectUsesCycle(&f); err != nil {
-		pe := &ParseError{Msg: err.Error()}
-		if l, c, ok := f.KeyPosition("dependencies", cycle); ok {
-			pe.Line, pe.Column = l, c
-		}
-		return File{}, pe
-	}
-	return f, nil
+	return parseInternal(contents, nil, paths)
 }
 
 // detectUsesCycle reports a cycle in the action uses graph using
@@ -494,16 +425,15 @@ func checkWorkflowPathKey(p string) error {
 	return nil
 }
 
-// allowedFileKeys is the set of permitted top-level lockfile keys. It mirrors
-// the document-level properties declared in lockfile-v0.0.1.json.
+// allowedFileKeys is the set of permitted top-level lockfile keys.
 var allowedFileKeys = map[string]struct{}{
 	"version":      {},
 	"workflows":    {},
 	"dependencies": {},
 }
 
-// allowedActionKeys is the set of permitted keys within a dependency's Action
-// mapping. It mirrors the $defs/action properties in lockfile-v0.0.1.json.
+// allowedActionKeys is the set of permitted keys within a v0.0.2 dependency's
+// Action mapping.
 var allowedActionKeys = map[string]struct{}{
 	"ref":      {},
 	"commit":   {},
@@ -512,107 +442,9 @@ var allowedActionKeys = map[string]struct{}{
 	"uses":     {},
 }
 
-// requiredActionKeys lists the keys every dependency's Action mapping must
-// carry, in report order. It mirrors the $defs/action "required" list in
-// lockfile-v0.0.1.json. `uses` is required only for composite actions — a
-// condition the lockfile alone can't express — so it doesn't appear here.
+// requiredActionKeys lists the keys every v0.0.2 dependency's Action mapping
+// must carry, in report order.
 var requiredActionKeys = []string{"ref", "commit", "owner_id", "repo_id"}
-
-// validateKnownFields enforces the schema's additionalProperties:false and
-// required rules on the lockfile's fixed-shape mappings — the document root and
-// each dependency's metadata block. A stray, misspelled, or missing key is a
-// positioned parse error rather than a silently dropped or defaulted field,
-// matching the stricter parsing the embedded schema describes. Map-valued
-// sections (workflow paths, dependency pin keys) carry arbitrary data keys and
-// are intentionally not constrained here.
-//
-// When paths is non-empty, per-dependency checks (unknown keys, required keys,
-// zero-value rejection) are scoped to only the dependency entries referenced
-// by the union of f.Workflows[p] for each requested path. This prevents a
-// single corrupt entry from failing every workflow that shares the lockfile.
-// When paths is empty, every dependency entry is validated.
-func validateKnownFields(f *File, paths []string) *ParseError {
-	root := docMapping(f.node)
-	if root == nil {
-		return nil
-	}
-	for i := 0; i+1 < len(root.Content); i += 2 {
-		k := root.Content[i]
-		if _, ok := allowedFileKeys[k.Value]; !ok {
-			return &ParseError{Line: k.Line, Column: k.Column, Msg: fmt.Sprintf("unknown lockfile field %q", k.Value)}
-		}
-	}
-	_, deps := mappingEntry(root, "dependencies")
-	if deps == nil || deps.Kind != yaml.MappingNode {
-		return nil
-	}
-
-	// Build the in-scope set from the raw (pre-canonicalization) workflow
-	// entries. nil means "validate all" (len(paths)==0); a non-nil but empty
-	// map means "validate nothing" (requested paths had no matching deps).
-	var inScope map[string]struct{}
-	if len(paths) > 0 {
-		inScope = make(map[string]struct{})
-		for _, p := range paths {
-			for _, pin := range f.Workflows[p] {
-				inScope[pin] = struct{}{}
-			}
-		}
-	}
-
-	for i := 0; i+1 < len(deps.Content); i += 2 {
-		pinKey := deps.Content[i]
-		action := deps.Content[i+1]
-		if action.Kind != yaml.MappingNode {
-			continue
-		}
-
-		if inScope != nil {
-			if _, ok := inScope[pinKey.Value]; !ok {
-				continue
-			}
-		}
-
-		present := make(map[string]struct{}, len(action.Content)/2)
-		for j := 0; j+1 < len(action.Content); j += 2 {
-			ak := action.Content[j]
-			if _, ok := allowedActionKeys[ak.Value]; !ok {
-				return &ParseError{
-					Line:   ak.Line,
-					Column: ak.Column,
-					Msg:    fmt.Sprintf("unknown action field %q for dependency %q", ak.Value, pinKey.Value),
-				}
-			}
-			present[ak.Value] = struct{}{}
-		}
-		for _, req := range requiredActionKeys {
-			if _, ok := present[req]; !ok {
-				// The missing key has no node to point at; anchor the error on
-				// the dependency's pin key so callers can locate the entry.
-				return &ParseError{
-					Line:   pinKey.Line,
-					Column: pinKey.Column,
-					Msg:    fmt.Sprintf("missing required action field %q for dependency %q", req, pinKey.Value),
-				}
-			}
-		}
-		// Enforce non-zero values for fields where the zero value is
-		// meaningless and would silently disable a security check.
-		if pe := rejectZeroValues(action, pinKey.Value); pe != nil {
-			return pe
-		}
-		// Reject entries where the pin key's ref disagrees with the body's
-		// ref field — a mismatch means the lockfile was hand-edited
-		// inconsistently and cannot be trusted.
-		if pe := rejectKeyRefMismatch(pinKey, action); pe != nil {
-			return pe
-		}
-		if pe := rejectFullSHACommitMismatch(pinKey, action); pe != nil {
-			return pe
-		}
-	}
-	return nil
-}
 
 // nonEmptyStringKeys lists action fields that must be non-empty strings.
 var nonEmptyStringKeys = map[string]struct{}{
