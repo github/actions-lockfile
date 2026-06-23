@@ -45,7 +45,7 @@ func main() {
 		return
 	}
 	for _, key := range pins {
-		fmt.Println(key) // e.g. actions/checkout@v6.0.2:sha1-de0fac2e...
+		fmt.Println(key) // e.g. actions/checkout@v6.0.2
 	}
 }
 ```
@@ -74,39 +74,43 @@ _ = file
 The lockfile is a YAML document whose shape is defined by a JSON Schema 2020-12
 document embedded in the package and reachable via `lockfile.Schema()`.
 
-The current schema version is `v0.0.1`
-([`schema/lockfile-v0.0.1.json`](https://github.com/github/actions-lockfile/blob/main/schema/lockfile-v0.0.1.json)).
+The current schema version is `v0.0.2`
+([`schema/lockfile-v0.0.2.json`](https://github.com/github/actions-lockfile/blob/main/schema/lockfile-v0.0.2.json)).
 The on-disk file lives at
 [`Path`](https://github.com/github/actions-lockfile/blob/main/go/pkg/lockfile/lockfile.go)
 (`.github/workflows/actions.lock`) and has three top-level keys:
 
 ```yaml
-version: v0.0.1
+version: v0.0.2
 workflows:
-  # workflow path → flat, transitive list of canonical pin keys
+  # workflow path -> flat, transitive list of pin keys
   .github/workflows/release.yml:
-    - actions/checkout@v6.0.2:sha1-de0fac2e...
+    - actions/checkout@v6.0.2
 dependencies:
-  # canonical pin key → resolved action metadata
-  actions/checkout@v6.0.2:sha1-de0fac2e...:
-    tag: v6.0.2
-    branch: main
+  # pin key -> resolved action metadata
+  actions/checkout@v6.0.2:
+    ref: v6.0.2
     commit: sha1-de0fac2e...
     owner_id: 44036562
     repo_id: 197814629
 ```
 
-A canonical pin key is `OWNER/REPO@REF:ALGO-HEX`. The same key appears in both
-`workflows` (as flat transitive lists) and `dependencies` (as deduplicated
-graph entries with `uses:` links to direct dependencies).
+A pin key is `OWNER/REPO@REF`. The same key appears in both `workflows` (as
+flat transitive lists) and `dependencies` (as deduplicated graph entries with
+`uses:` links to direct dependencies).
+
+The parser also reads v0.0.1 lockfiles (which used `tag`/`branch` fields and
+`:algo-hex` suffixed pin keys) and normalizes them to the v0.0.2 `File` struct.
+Use `ParseWithPolicy` with a `VersionPolicy` to control which versions are
+accepted.
 
 ## Compatibility and stability
 
 - The Go module follows [semver](https://semver.org/). The publicly documented
   exported surface is intended to be stable across minor versions.
 - The lockfile schema is versioned independently. The current schema version
-  is `v0.0.1`, embedded in the package and emitted as the `version` field of
-  every lockfile.
+  is `v0.0.2`, embedded in the package and emitted as the `version` field of
+  every lockfile. The parser reads both v0.0.1 and v0.0.2.
 - Pre-1.0, the package reserves the right to remove any incidentally-exported
   helper not covered by the [Usage](#usage) and
   [What this package does](#what-this-package-does) sections. Those sections
