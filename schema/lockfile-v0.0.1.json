@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gh.io/actions-lockfile/v0.0.2.json",
+  "$id": "https://gh.io/actions-lockfile/v0.0.1.json",
   "title": "GitHub Actions dependency lockfile",
   "description": "Machine-generated lockfile describing the pinned action dependency graph for a repository's workflows. Written and updated by `gh actions-lock`.",
   "type": "object",
@@ -8,8 +8,8 @@
   "required": ["version"],
   "properties": {
     "version": {
-      "description": "Lockfile schema version. Only v0.0.2 is supported.",
-      "const": "v0.0.2"
+      "description": "Lockfile schema version. Only v0.0.1 is supported.",
+      "const": "v0.0.1"
     },
     "workflows": {
       "description": "Map of repo-relative workflow path to the flat, transitive list of canonical pin keys it depends on.",

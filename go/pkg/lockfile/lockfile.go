@@ -81,7 +81,7 @@ func newYAMLParseError(err error) *ParseError {
 }
 
 // Version is the only supported lockfile schema version.
-const Version = "v0.0.2"
+const Version = "v0.0.1"
 
 // Path is the canonical repo-relative location of the dependency lockfile.
 const Path = ".github/workflows/actions.lock"
@@ -89,7 +89,7 @@ const Path = ".github/workflows/actions.lock"
 // File is the parsed lockfile shape.
 //
 //	# .github/workflows/actions.lock
-//	version: v0.0.2
+//	version: v0.0.1
 //	workflows:
 //	  .github/workflows/deploy.yml:
 //	    - actions/checkout@v6
@@ -108,7 +108,7 @@ const Path = ".github/workflows/actions.lock"
 // Workflow entries hold the full transitive closure as a flat list of pin
 // keys for cold readability.
 type File struct {
-	// Version is the lockfile schema version string (e.g. "v0.0.2"). It is
+	// Version is the lockfile schema version string (e.g. "v0.0.1"). It is
 	// always equal to the [Version] constant for files Parse accepts.
 	Version string `yaml:"version"`
 
@@ -749,7 +749,7 @@ func rejectFullSHACommitMismatch(pinKey, action *yaml.Node) *ParseError {
 // would be ambiguous about which Action metadata applies. On conflict it
 // returns the offending source key so callers can locate it in the YAML tree.
 //
-// Dependency keys and Uses entries that do not parse as valid v0.0.2 pin
+// Dependency keys and Uses entries that do not parse as valid v0.0.1 pin
 // strings (OWNER/REPO@REF) are rejected — this catches legacy
 // digest-suffixed keys (owner/repo@ref:sha1-...) that are invalid under
 // the current schema.
@@ -806,7 +806,7 @@ func equalAction(a, b Action) bool {
 
 // canonicalizeWorkflowDependencies rewrites every workflow's pin list to
 // canonical pin strings (Pin.String()) so lookups into the Dependencies map are
-// casing-agnostic. Entries that do not parse as valid v0.0.2 pin strings are
+// casing-agnostic. Entries that do not parse as valid v0.0.1 pin strings are
 // rejected — legacy digest-suffixed pins and other malformed values are not
 // preserved.
 func canonicalizeWorkflowDependencies(f *File) (string, string, error) {

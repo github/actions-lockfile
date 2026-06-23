@@ -46,7 +46,7 @@ func (p Pin) String() string {
 }
 
 // IndexKey returns the normalized lookup key for this pin: "OWNER/REPO@REF".
-// Identical to String() in v0.0.2 — retained for API compatibility.
+// Identical to String() — retained for API compatibility.
 func (p Pin) IndexKey() string {
 	return p.String()
 }

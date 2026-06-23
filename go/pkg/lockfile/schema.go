@@ -11,5 +11,5 @@ package lockfile
 // not the dependencies map keys, so schema validation alone won't enforce that
 // every dependency key is a canonical pin either.
 func Schema() string {
-	return schemaV002
+	return schemaV001
 }
