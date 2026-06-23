@@ -272,8 +272,12 @@ func migrateV001Actions(f *File) {
 		// Validate the synthesized ref against the same denylist that
 		// rejectZeroValues applies to v0.0.2 ref fields — prevents shell
 		// metacharacters in tag/branch values from flowing into Action.Ref.
+		// Fall back to pin key ref if tag/branch was invalid.
 		if ref != "" && !isValidRef(ref) {
 			ref = ""
+			if pin, ok := parsePinV001(pinKey.Value); ok && isValidRef(pin.Ref) {
+				ref = pin.Ref
+			}
 		}
 
 		// Update the Action in the File struct.
