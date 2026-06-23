@@ -86,6 +86,11 @@ const Version = "v0.0.2"
 // Path is the canonical repo-relative location of the dependency lockfile.
 const Path = ".github/workflows/actions.lock"
 
+// CLIName is the canonical name of the CLI extension that manages lockfiles.
+// Use this in user-facing messages instead of hardcoding the string, so all
+// consumers (parser, launch, docs) stay consistent if it ever changes again.
+const CLIName = "gh actions-lock"
+
 // File is the parsed lockfile shape.
 //
 //	# .github/workflows/actions.lock
