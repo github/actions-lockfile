@@ -198,18 +198,10 @@ func isKnownVersion(v string) bool {
 }
 
 // versionLessThan reports whether a < b using semver comparison.
+// Reuses the existing parseSchemaVersion + isFutureVersion helpers from
+// lockfile.go rather than reimplementing the comparison.
 func versionLessThan(a, b string) bool {
-	av, aOK := parseSchemaVersion(a)
-	bv, bOK := parseSchemaVersion(b)
-	if !aOK || !bOK {
-		return false
-	}
-	for i := 0; i < 3; i++ {
-		if av[i] != bv[i] {
-			return av[i] < bv[i]
-		}
-	}
-	return false
+	return isFutureVersion(b, a)
 }
 
 func positionFromNode(node *yaml.Node, key string) (line, col int, ok bool) {
