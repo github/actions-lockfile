@@ -520,6 +520,11 @@ func rejectKeyRefMismatch(pinKey, action *yaml.Node) *ParseError {
 		key := action.Content[j]
 		val := action.Content[j+1]
 		if key.Value == "ref" && val.Value != "" && val.Value != pin.Ref {
+			// When the pin key ref is a full SHA, the body's ref is the
+			// discovered symbolic ref (tag/branch) — mismatch is expected.
+			if IsFullSha(pin.Ref) {
+				continue
+			}
 			return &ParseError{
 				Line:   val.Line,
 				Column: val.Column,

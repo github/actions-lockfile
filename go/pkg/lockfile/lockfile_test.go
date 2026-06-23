@@ -2,6 +2,7 @@ package lockfile
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -480,6 +481,80 @@ dependencies:
 `
 	_, err := Parse([]byte(yaml))
 	require.NoError(t, err)
+}
+
+func TestParse_FullSHAPinKeyRefMismatchAllowed(t *testing.T) {
+	// When the pin key ref is a full SHA (transitive dep pinned by commit),
+	// the body's ref is the discovered symbolic ref — mismatch is expected.
+	cases := []struct {
+		name string
+		yaml string
+	}{
+		{
+			name: "40-char SHA key with semver body ref",
+			yaml: "version: v0.0.2\ndependencies:\n" +
+				"  golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20:\n" +
+				"    ref: v9.2.0\n" +
+				"    commit: sha1-1e7e51e771db61008b38414a730f564565cf7c20\n" +
+				"    owner_id: 1\n    repo_id: 1\n",
+		},
+		{
+			name: "64-char SHA key with branch body ref",
+			yaml: "version: v0.0.2\ndependencies:\n" +
+				"  actions/checkout@" + strings.Repeat("ab", 32) + ":\n" +
+				"    ref: main\n" +
+				"    commit: sha256-" + strings.Repeat("ab", 32) + "\n" +
+				"    owner_id: 1\n    repo_id: 1\n",
+		},
+		{
+			name: "40-char SHA key with branch body ref",
+			yaml: "version: v0.0.2\ndependencies:\n" +
+				"  org/action@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:\n" +
+				"    ref: releases/v3\n" +
+				"    commit: sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n" +
+				"    owner_id: 42\n    repo_id: 99\n",
+		},
+		{
+			name: "symbolic ref still enforced (not a full SHA)",
+			yaml: "version: v0.0.2\ndependencies:\n" +
+				"  actions/checkout@v4:\n" +
+				"    ref: v4\n" +
+				"    commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683\n" +
+				"    owner_id: 1\n    repo_id: 1\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f, err := Parse([]byte(tc.yaml))
+			require.NoError(t, err)
+			assert.Len(t, f.Dependencies, 1)
+		})
+	}
+}
+
+func TestParse_SymbolicRefMismatchStillRejected(t *testing.T) {
+	// Non-SHA pin key refs must still match the body ref.
+	cases := []struct {
+		name    string
+		pinRef  string
+		bodyRef string
+	}{
+		{"semver mismatch", "v4", "v3"},
+		{"branch mismatch", "main", "develop"},
+		{"partial SHA not exempt", "1e7e51e", "v9.2.0"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			y := "version: v0.0.2\ndependencies:\n" +
+				"  actions/checkout@" + tc.pinRef + ":\n" +
+				"    ref: " + tc.bodyRef + "\n" +
+				"    commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683\n" +
+				"    owner_id: 1\n    repo_id: 1\n"
+			_, err := Parse([]byte(y))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "does not match pin key ref")
+		})
+	}
 }
 
 func TestParse_FullSHARefCommitMismatchRejected(t *testing.T) {
