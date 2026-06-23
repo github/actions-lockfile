@@ -10,10 +10,10 @@ import (
 
 // Pin holds the parsed components of a dependency pin key.
 //
-//	"OWNER/REPO@REF:ALGO-HEX"
+//	"OWNER/REPO@REF"
 //
-// The pin identifies a downloaded action tarball at repo+SHA granularity —
-// matching the runner, which downloads `owner/repo@sha` once per ref and
+// The pin identifies a downloaded action tarball at repo+ref granularity —
+// matching the runner, which downloads `owner/repo@ref` once per ref and
 // reuses the tree for any sub-action path. Sub-action paths (e.g. the
 // `save` in `actions/cache/save@v4`) are graph traversal details, not pin
 // identity, and do not appear in this serialized form.
@@ -22,13 +22,11 @@ type Pin struct {
 	Owner string // "actions"
 	Repo  string // "checkout"
 	Ref   string // "v4"
-	Algo  string // "sha1"
-	Hex   string // "34e114876b0b11c390a56381ad16ebd13914f8d5"
 }
 
 // Canonical returns a copy of p with all case-insensitive components
-// (owner, repo, algo, hex) normalized to lowercase. Ref preserves source
-// casing — git refs are case-sensitive.
+// (owner, repo) normalized to lowercase. Ref preserves source casing —
+// git refs are case-sensitive.
 //
 // This is the single normalization point for the lockfile pin grammar:
 // String, IndexKey, and ParsePin all funnel through it, so callers never
@@ -36,59 +34,52 @@ type Pin struct {
 func (p Pin) Canonical() Pin {
 	p.Owner = strings.ToLower(p.Owner)
 	p.Repo = strings.ToLower(p.Repo)
-	p.Algo = strings.ToLower(p.Algo)
-	p.Hex = strings.ToLower(p.Hex)
 	p.NWO = p.Owner + "/" + p.Repo
 	return p
 }
 
-// String returns the canonical pin form: "OWNER/REPO@REF:ALGO-HEX".
+// String returns the canonical pin form: "OWNER/REPO@REF".
 // This doubles as the actions-map key in the lockfile.
 func (p Pin) String() string {
-	c := p.Canonical()
-	return c.NWO + "@" + c.Ref + ":" + c.Algo + "-" + c.Hex
-}
-
-// IndexKey returns the normalized lookup key for this pin without the digest:
-// "OWNER/REPO@REF".
-func (p Pin) IndexKey() string {
 	c := p.Canonical()
 	return c.NWO + "@" + c.Ref
 }
 
-// IndexKey builds the normalized lookup key for a dependency entry without
-// the digest: "OWNER/REPO@REF".
+// IndexKey returns the normalized lookup key for this pin: "OWNER/REPO@REF".
+// Identical to String() — retained for API compatibility.
+func (p Pin) IndexKey() string {
+	return p.String()
+}
+
+// IndexKey builds the normalized lookup key for a dependency entry:
+// "OWNER/REPO@REF".
 func IndexKey(owner, repo, ref string) string {
 	return Pin{Owner: owner, Repo: repo, Ref: ref}.IndexKey()
 }
 
 // ParsePin parses a pin string of the canonical form:
 //
-//	"OWNER/REPO@REF:ALGO-HEX"
+//	"OWNER/REPO@REF"
 //
 // Returns ok=false for any input that does not match — including all of:
 //   - Missing "@" separator between repo and ref
-//   - Missing ":" separator between ref and digest
-//   - A sub-action path in the repo portion (e.g. "owner/repo/sub@ref:...")
+//   - A sub-action path in the repo portion (e.g. "owner/repo/sub@ref")
 //     — the lockfile grammar is strictly repo-scoped, matching the runner's
 //     tarball download identity
-//   - An unknown or unsupported digest algorithm (only "sha1" and "sha256"
-//     are recognized)
-//   - A hex digest that is the wrong length or contains non-hex characters
 //
-// On success, all case-insensitive components (owner, repo, algo, hex) are
-// normalized to lowercase. Ref preserves source casing — git refs are
-// case-sensitive. The returned Pin is always in canonical form.
+// On success, owner and repo are normalized to lowercase. Ref preserves
+// source casing — git refs are case-sensitive. The returned Pin is always
+// in canonical form.
 func ParsePin(s string) (Pin, bool) {
 	atIdx := strings.IndexByte(s, '@')
 	if atIdx <= 0 || atIdx == len(s)-1 {
 		return Pin{}, false
 	}
 	repoPath := s[:atIdx]
-	refHash := s[atIdx+1:]
+	ref := s[atIdx+1:]
 
 	// Sub-action paths are not part of the lockfile pin grammar: the runner
-	// downloads at repo+sha granularity. Reject any extra slashes in the
+	// downloads at repo+ref granularity. Reject any extra slashes in the
 	// repo portion so hand-edited lockfiles don't drift into a path-bearing
 	// format.
 	if strings.Count(repoPath, "/") != 1 {
@@ -99,31 +90,8 @@ func ParsePin(s string) (Pin, bool) {
 		return Pin{}, false
 	}
 
-	colonIdx := strings.LastIndexByte(refHash, ':')
-	if colonIdx <= 0 || colonIdx == len(refHash)-1 {
-		return Pin{}, false
-	}
-	ref := refHash[:colonIdx]
-	if strings.ContainsRune(ref, ':') {
-		return Pin{}, false
-	}
-	// Validate the ref with the same denylist used by ParseActionRef to
-	// reject shell metacharacters, whitespace, and traversal sequences.
-	// This does NOT make the ref safe for verbatim interpolation into URLs
-	// or shell commands -- callers must still escape appropriately for their
-	// context. The goal is to reject obviously-malicious refs at parse time.
+	// Reject empty refs and colons (colon is the legacy pin key separator).
 	if !isValidRef(ref) {
-		return Pin{}, false
-	}
-	hashSpec := refHash[colonIdx+1:]
-
-	dashIdx := strings.IndexByte(hashSpec, '-')
-	if dashIdx <= 0 || dashIdx == len(hashSpec)-1 {
-		return Pin{}, false
-	}
-	algo := strings.ToLower(hashSpec[:dashIdx])
-	hexDigest := strings.ToLower(hashSpec[dashIdx+1:])
-	if !isValidDigest(algo, hexDigest) {
 		return Pin{}, false
 	}
 
@@ -131,8 +99,6 @@ func ParsePin(s string) (Pin, bool) {
 		Owner: owner,
 		Repo:  repo,
 		Ref:   ref,
-		Algo:  algo,
-		Hex:   hexDigest,
 	}.Canonical(), true
 }
 
