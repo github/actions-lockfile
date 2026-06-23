@@ -81,7 +81,7 @@ func newYAMLParseError(err error) *ParseError {
 }
 
 // Version is the only supported lockfile schema version.
-const Version = "v0.0.1"
+const Version = "v0.0.2"
 
 // Path is the canonical repo-relative location of the dependency lockfile.
 const Path = ".github/workflows/actions.lock"
@@ -89,19 +89,18 @@ const Path = ".github/workflows/actions.lock"
 // File is the parsed lockfile shape.
 //
 //	# .github/workflows/actions.lock
-//	version: v0.0.1
+//	version: v0.0.2
 //	workflows:
 //	  .github/workflows/deploy.yml:
-//	    - actions/checkout@v6:sha1-8e8c483db84b4bee98b60c0593521ed34d9990e8
+//	    - actions/checkout@v6
 //	dependencies:
-//	  actions/checkout@v4.3.1:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5:
-//	    tag: v4.3.1
-//	    branch: main
+//	  actions/checkout@v4.3.1:
+//	    ref: v4.3.1
 //	    commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
 //	    owner_id: 44036562
 //	    repo_id: 197814629
 //	    uses:
-//	      - actions/cache@v4.0.0:sha1-...
+//	      - actions/cache@v4.0.0
 //
 // The Go field `Dependencies` maps to the YAML key `dependencies:` — the
 // lockfile's deduplicated action DAG. Each entry's `uses:` list names the
@@ -109,11 +108,11 @@ const Path = ".github/workflows/actions.lock"
 // Workflow entries hold the full transitive closure as a flat list of pin
 // keys for cold readability.
 type File struct {
-	// Version is the lockfile schema version string (e.g. "v0.0.1"). It is
+	// Version is the lockfile schema version string (e.g. "v0.0.2"). It is
 	// always equal to the [Version] constant for files Parse accepts.
 	Version string `yaml:"version"`
 
-	// Dependencies maps each canonical pin key (OWNER/REPO@REF:ALGO-HEX) to
+	// Dependencies maps each canonical pin key (OWNER/REPO@REF) to
 	// the resolved [Action] metadata for that pin. The map is deduplicated:
 	// multiple workflows that share an action produce a single entry here.
 	// Use [File.LookupWorkflow] to find the pin keys for a specific workflow,
@@ -123,7 +122,7 @@ type File struct {
 	// Workflows maps each repo-relative workflow file path (e.g.
 	// ".github/workflows/release.yml") to the flat, transitive list of
 	// canonical pin keys that workflow depends on. Pin keys are in
-	// OWNER/REPO@REF:ALGO-HEX form and serve as lookup keys into
+	// OWNER/REPO@REF form and serve as lookup keys into
 	// Dependencies. Prefer [File.LookupWorkflow] over indexing this
 	// map directly.
 	Workflows map[string][]string `yaml:"workflows"`
@@ -368,7 +367,13 @@ func Parse(contents []byte, paths ...string) (File, error) {
 		}
 		return File{}, pe
 	}
-	canonicalizeWorkflowDependencies(&f)
+	if wfPath, _, err := canonicalizeWorkflowDependencies(&f); err != nil {
+		pe := &ParseError{Msg: err.Error(), err: err}
+		if l, c, ok := f.KeyPosition("workflows", wfPath); ok {
+			pe.Line, pe.Column = l, c
+		}
+		return File{}, pe
+	}
 	if cycle, err := detectUsesCycle(&f); err != nil {
 		pe := &ParseError{Msg: err.Error()}
 		if l, c, ok := f.KeyPosition("dependencies", cycle); ok {
@@ -596,6 +601,15 @@ func validateKnownFields(f *File, paths []string) *ParseError {
 		if pe := rejectZeroValues(action, pinKey.Value); pe != nil {
 			return pe
 		}
+		// Reject entries where the pin key's ref disagrees with the body's
+		// ref field — a mismatch means the lockfile was hand-edited
+		// inconsistently and cannot be trusted.
+		if pe := rejectKeyRefMismatch(pinKey, action); pe != nil {
+			return pe
+		}
+		if pe := rejectFullSHACommitMismatch(pinKey, action); pe != nil {
+			return pe
+		}
 	}
 	return nil
 }
@@ -672,42 +686,93 @@ func rejectZeroValues(action *yaml.Node, dep string) *ParseError {
 	return nil
 }
 
+// rejectKeyRefMismatch returns a ParseError if the dependency key parses
+// as a valid pin and the body's "ref:" field disagrees with the key's ref
+// component. A mismatch indicates an inconsistent hand-edit that could
+// silently resolve a different ref than the key advertises.
+func rejectKeyRefMismatch(pinKey, action *yaml.Node) *ParseError {
+	pin, ok := ParsePin(pinKey.Value)
+	if !ok {
+		return nil
+	}
+	for j := 0; j+1 < len(action.Content); j += 2 {
+		key := action.Content[j]
+		val := action.Content[j+1]
+		if key.Value == "ref" && val.Value != "" && val.Value != pin.Ref {
+			return &ParseError{
+				Line:   val.Line,
+				Column: val.Column,
+				Msg:    fmt.Sprintf("action body ref %q does not match pin key ref %q for dependency %q", val.Value, pin.Ref, pinKey.Value),
+			}
+		}
+	}
+	return nil
+}
+
+// rejectFullSHACommitMismatch returns a ParseError when the pin key's ref is a
+// full commit SHA (40 or 64 hex chars) and the body's "commit:" field encodes a
+// different digest. Full-SHA refs are immutable — the commit field must agree
+// with the ref, otherwise the entry is internally inconsistent.
+func rejectFullSHACommitMismatch(pinKey, action *yaml.Node) *ParseError {
+	pin, ok := ParsePin(pinKey.Value)
+	if !ok {
+		return nil
+	}
+	if !IsFullSha(pin.Ref) {
+		return nil
+	}
+	for j := 0; j+1 < len(action.Content); j += 2 {
+		key := action.Content[j]
+		val := action.Content[j+1]
+		if key.Value == "commit" && val.Value != "" {
+			// Extract the hex portion after the algo prefix (e.g. "sha1-<hex>").
+			dashIdx := strings.IndexByte(val.Value, '-')
+			if dashIdx <= 0 || dashIdx == len(val.Value)-1 {
+				return nil // malformed commit caught elsewhere
+			}
+			commitHex := strings.ToLower(val.Value[dashIdx+1:])
+			if strings.ToLower(pin.Ref) != commitHex {
+				return &ParseError{
+					Line:   val.Line,
+					Column: val.Column,
+					Msg:    fmt.Sprintf("pin key ref is a full SHA (%s) but commit digest %q does not match for dependency %q", ShortSHA(pin.Ref), val.Value, pinKey.Value),
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // canonicalizeActions rewrites the Dependencies map so every key is the
 // canonical form of its pin (Pin.String()). A conflict between two
 // different source casings of the same pin is a parse error — the file
 // would be ambiguous about which Action metadata applies. On conflict it
 // returns the offending source key so callers can locate it in the YAML tree.
+//
+// Dependency keys and Uses entries that do not parse as valid v0.0.2 pin
+// strings (OWNER/REPO@REF) are rejected — this catches legacy
+// digest-suffixed keys (owner/repo@ref:sha1-...) that are invalid under
+// the current schema.
 func canonicalizeActions(f *File) (string, error) {
 	if len(f.Dependencies) == 0 {
 		return "", nil
 	}
 	out := make(map[string]Action, len(f.Dependencies))
 	for key, action := range f.Dependencies {
-		canonical := key
-		if pin, ok := ParsePin(key); ok {
-			canonical = pin.String()
-			// The commit field in the action body must match the digest
-			// embedded in the pin key. A mismatch is a trust-confusion
-			// attack: the caller looks up the action by key (and its
-			// embedded hash) but the body carries a different hash that
-			// a different downstream check might trust.
-			pinDigest := pin.Algo + "-" + pin.Hex
-			if action.Commit != "" && action.Commit != pinDigest {
-				return key, fmt.Errorf(
-					"action %q commit field %q disagrees with pin key digest %q",
-					canonical, action.Commit, pinDigest,
-				)
-			}
+		pin, ok := ParsePin(key)
+		if !ok {
+			return key, fmt.Errorf("dependency key %q is not a valid pin (expected OWNER/REPO@REF)", key)
 		}
+		canonical := pin.String()
 		// Canonicalize Uses entries too so cross-references resolve.
 		if len(action.Uses) > 0 {
 			canonUses := make([]string, len(action.Uses))
 			for i, u := range action.Uses {
-				if pin, ok := ParsePin(u); ok {
-					canonUses[i] = pin.String()
-				} else {
-					canonUses[i] = u
+				uPin, uOk := ParsePin(u)
+				if !uOk {
+					return key, fmt.Errorf("uses entry %q in dependency %q is not a valid pin (expected OWNER/REPO@REF)", u, key)
 				}
+				canonUses[i] = uPin.String()
 			}
 			action.Uses = canonUses
 		}
@@ -741,23 +806,25 @@ func equalAction(a, b Action) bool {
 
 // canonicalizeWorkflowDependencies rewrites every workflow's pin list to
 // canonical pin strings (Pin.String()) so lookups into the Dependencies map are
-// casing-agnostic. Unparseable entries are preserved verbatim for downstream
-// diagnostics to flag.
-func canonicalizeWorkflowDependencies(f *File) {
+// casing-agnostic. Entries that do not parse as valid v0.0.2 pin strings are
+// rejected — legacy digest-suffixed pins and other malformed values are not
+// preserved.
+func canonicalizeWorkflowDependencies(f *File) (string, string, error) {
 	for path, deps := range f.Workflows {
 		if len(deps) == 0 {
 			continue
 		}
 		canonicalized := make([]string, len(deps))
 		for i, dep := range deps {
-			if pin, ok := ParsePin(dep); ok {
-				canonicalized[i] = pin.String()
-			} else {
-				canonicalized[i] = dep
+			pin, ok := ParsePin(dep)
+			if !ok {
+				return path, dep, fmt.Errorf("workflow %q dependency %q is not a valid pin (expected OWNER/REPO@REF)", path, dep)
 			}
+			canonicalized[i] = pin.String()
 		}
 		f.Workflows[path] = canonicalized
 	}
+	return "", "", nil
 }
 
 // schemaVersionRE matches "vMAJOR.MINOR.PATCH" with an optional leading "v"

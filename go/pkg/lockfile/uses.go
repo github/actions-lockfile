@@ -245,7 +245,7 @@ func isValidRef(ref string) bool {
 	}
 	for _, r := range ref {
 		switch r {
-		case ' ', '\t', '\n', '\r', '\v', '\f', '"', '\'', '`', '\\':
+		case ' ', '\t', '\n', '\r', '\v', '\f', '"', '\'', '`', '\\', ':':
 			return false
 		}
 	}

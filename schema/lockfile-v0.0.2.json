@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gh.io/actions-lockfile/v0.0.1.json",
+  "$id": "https://gh.io/actions-lockfile/v0.0.2.json",
   "title": "GitHub Actions dependency lockfile",
   "description": "Machine-generated lockfile describing the pinned action dependency graph for a repository's workflows. Written and updated by `gh actions-lock`.",
   "type": "object",
@@ -8,8 +8,8 @@
   "required": ["version"],
   "properties": {
     "version": {
-      "description": "Lockfile schema version. Only v0.0.1 is supported.",
-      "const": "v0.0.1"
+      "description": "Lockfile schema version. Only v0.0.2 is supported.",
+      "const": "v0.0.2"
     },
     "workflows": {
       "description": "Map of repo-relative workflow path to the flat, transitive list of canonical pin keys it depends on.",
@@ -27,9 +27,9 @@
   },
   "$defs": {
     "pin": {
-      "description": "Canonical dependency pin: OWNER/REPO@REF:ALGO-HEX (e.g. actions/checkout@v4:sha1-34e1...).",
+      "description": "Canonical dependency pin: OWNER/REPO@REF (e.g. actions/checkout@v4).",
       "type": "string",
-      "pattern": "^[^/@:]+/[^/@:]+@[^:]+:(sha1-[0-9a-f]{40}|sha256-[0-9a-f]{64})$"
+      "pattern": "^[^/@:]+/[^/@:]+@[^:]+$"
     },
     "action": {
       "description": "Resolved metadata for a single pinned action.",

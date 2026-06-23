@@ -11,7 +11,7 @@ import (
 )
 
 func TestSchema_EmbeddedMatchesRootInvariant(t *testing.T) {
-	rootSchema, err := os.ReadFile("../../../schema/lockfile-v0.0.1.json")
+	rootSchema, err := os.ReadFile("../../../schema/lockfile-v0.0.2.json")
 	if errors.Is(err, os.ErrNotExist) {
 		t.Skip("root schema invariant is not present in this module checkout")
 	}
@@ -64,7 +64,7 @@ func TestSchema_EmbeddedMatchesEnforcement(t *testing.T) {
 }
 
 func TestParse_UnknownTopLevelFieldRejected(t *testing.T) {
-	yaml := `version: v0.0.1
+	yaml := `version: v0.0.2
 dependencies: {}
 typo_section: {}
 `
@@ -79,9 +79,9 @@ typo_section: {}
 }
 
 func TestParse_UnknownActionFieldRejected(t *testing.T) {
-	yaml := `version: v0.0.1
+	yaml := `version: v0.0.2
 dependencies:
-  actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5:
+  actions/checkout@v4:
     owner_id: 1
     repo_id: 2
     flavor: spicy
@@ -99,9 +99,9 @@ dependencies:
 
 func TestParse_MissingRequiredActionFieldRejected(t *testing.T) {
 	// commit/owner_id/repo_id present, but ref (required) is absent.
-	yaml := `version: v0.0.1
+	yaml := `version: v0.0.2
 dependencies:
-  actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5:
+  actions/checkout@v4:
     commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
     owner_id: 1
     repo_id: 2
@@ -118,9 +118,9 @@ dependencies:
 }
 
 func TestParse_EmptyCommitRejected(t *testing.T) {
-	yaml := `version: v0.0.1
+	yaml := `version: v0.0.2
 dependencies:
-  actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5:
+  actions/checkout@v4:
     ref: v4
     commit: ""
     owner_id: 1
@@ -136,9 +136,9 @@ dependencies:
 }
 
 func TestParse_ZeroOwnerIDRejected(t *testing.T) {
-	yaml := `version: v0.0.1
+	yaml := `version: v0.0.2
 dependencies:
-  actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5:
+  actions/checkout@v4:
     ref: v4
     commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
     owner_id: 0
@@ -154,9 +154,9 @@ dependencies:
 }
 
 func TestParse_ZeroRepoIDRejected(t *testing.T) {
-	yaml := `version: v0.0.1
+	yaml := `version: v0.0.2
 dependencies:
-  actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5:
+  actions/checkout@v4:
     ref: v4
     commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
     owner_id: 1
@@ -172,9 +172,9 @@ dependencies:
 }
 
 func TestParse_NegativeIDRejected(t *testing.T) {
-	yaml := `version: v0.0.1
+	yaml := `version: v0.0.2
 dependencies:
-  actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5:
+  actions/checkout@v4:
     ref: v4
     commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
     owner_id: -1
@@ -190,18 +190,18 @@ dependencies:
 }
 
 func TestParse_KnownFieldsAccepted(t *testing.T) {
-	yaml := `version: v0.0.1
+	yaml := `version: v0.0.2
 workflows:
   .github/workflows/ci.yml:
-    - actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
+    - actions/checkout@v4
 dependencies:
-  actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5:
+  actions/checkout@v4:
     ref: v4
     commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
     owner_id: 1
     repo_id: 2
     uses:
-      - actions/cache@v4:sha1-0000000000000000000000000000000000000000
+      - actions/cache@v4
 `
 	f, err := Parse([]byte(yaml))
 	require.NoError(t, err)
@@ -214,22 +214,22 @@ dependencies:
 // "commit" field. Workflow A references only the good dep, workflow B
 // references only the corrupt dep.
 const (
-	goodPin    = "actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5"
-	corruptPin = "actions/setup-go@v5:sha1-0000000000000000000000000000000000000000"
+	goodPin    = "actions/checkout@v4"
+	corruptPin = "actions/setup-go@v5"
 
-	corruptLockfile = `version: v0.0.1
+	corruptLockfile = `version: v0.0.2
 workflows:
   .github/workflows/a.yml:
-    - actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
+    - actions/checkout@v4
   .github/workflows/b.yml:
-    - actions/setup-go@v5:sha1-0000000000000000000000000000000000000000
+    - actions/setup-go@v5
 dependencies:
-  actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5:
+  actions/checkout@v4:
     ref: v4
     commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
     owner_id: 1
     repo_id: 2
-  actions/setup-go@v5:sha1-0000000000000000000000000000000000000000:
+  actions/setup-go@v5:
     ref: v5
     owner_id: 3
     repo_id: 4
@@ -278,12 +278,12 @@ func TestParse_ScopedValidation_GoodAndCorruptPaths_Errors(t *testing.T) {
 }
 
 func TestParse_ScopedValidation_UnknownActionField_InScope_Errors(t *testing.T) {
-	data := `version: v0.0.1
+	data := `version: v0.0.2
 workflows:
   .github/workflows/a.yml:
-    - actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
+    - actions/checkout@v4
 dependencies:
-  actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5:
+  actions/checkout@v4:
     ref: v4
     commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
     owner_id: 1
@@ -299,12 +299,12 @@ dependencies:
 }
 
 func TestParse_ScopedValidation_UnknownActionField_OutOfScope_OK(t *testing.T) {
-	data := `version: v0.0.1
+	data := `version: v0.0.2
 workflows:
   .github/workflows/b.yml:
-    - actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
+    - actions/checkout@v4
 dependencies:
-  actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5:
+  actions/checkout@v4:
     ref: v4
     commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
     owner_id: 1
@@ -317,12 +317,12 @@ dependencies:
 }
 
 func TestParse_ScopedValidation_ZeroValue_InScope_Errors(t *testing.T) {
-	data := `version: v0.0.1
+	data := `version: v0.0.2
 workflows:
   .github/workflows/a.yml:
-    - actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
+    - actions/checkout@v4
 dependencies:
-  actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5:
+  actions/checkout@v4:
     ref: v4
     commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
     owner_id: 0
@@ -338,12 +338,12 @@ dependencies:
 }
 
 func TestParse_ScopedValidation_ZeroValue_OutOfScope_OK(t *testing.T) {
-	data := `version: v0.0.1
+	data := `version: v0.0.2
 workflows:
   .github/workflows/a.yml:
-    - actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
+    - actions/checkout@v4
 dependencies:
-  actions/checkout@v4:sha1-34e114876b0b11c390a56381ad16ebd13914f8d5:
+  actions/checkout@v4:
     ref: v4
     commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
     owner_id: 0
@@ -355,7 +355,7 @@ dependencies:
 }
 
 func TestParse_ScopedValidation_UnknownTopLevel_StillErrors(t *testing.T) {
-	data := `version: v0.0.1
+	data := `version: v0.0.2
 typo_section: {}
 dependencies: {}
 `

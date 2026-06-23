@@ -49,7 +49,7 @@ func TestParse_WrongShapeReportsLine(t *testing.T) {
 	// pin keys fails yaml type-decoding. Parse must surface the failing line as
 	// structured data (ParseError.Line) and strip yaml.v3's "yaml:" prefix from
 	// the reason so consumers don't misattribute the position to their own file.
-	yaml := `version: v0.0.1
+	yaml := `version: v0.0.2
 dependencies: {}
 workflows:
   .github/workflows/ci.yml:
@@ -83,12 +83,12 @@ dependencies: {}
 func TestParse_DuplicateActionKeyReportsPosition(t *testing.T) {
 	// The conflicting key must be located in the source tree so the position
 	// points at a real offending dependency entry.
-	yaml := `version: v0.0.1
+	yaml := `version: v0.0.2
 dependencies:
-  actions/checkout@v6:sha1-8e8c483db84b4bee98b60c0593521ed34d9990e8:
+  actions/checkout@v6:
     owner_id: 1234
     repo_id: 5678
-  Actions/Checkout@v6:SHA1-8E8C483DB84B4BEE98B60C0593521ED34D9990E8:
+  Actions/Checkout@v6:
     owner_id: 9999
     repo_id: 1
 `
@@ -104,7 +104,7 @@ dependencies:
 func TestParse_PositionLookup(t *testing.T) {
 	// The retained node tree is exposed for consumer diagnostics via
 	// Position/KeyPosition.
-	yaml := `version: v0.0.1
+	yaml := `version: v0.0.2
 dependencies: {}
 workflows:
   .github/workflows/ci.yml: []
@@ -127,17 +127,17 @@ workflows:
 }
 
 func TestParse_CanonicalizesActionKeys(t *testing.T) {
-	const canonical = "actions/checkout@v6:sha1-8e8c483db84b4bee98b60c0593521ed34d9990e8"
-	yaml := `version: v0.0.1
+	const canonical = "actions/checkout@v6"
+	yaml := `version: v0.0.2
 dependencies:
-  Actions/Checkout@v6:SHA1-8E8C483DB84B4BEE98B60C0593521ED34D9990E8:
-    ref: v4
+  Actions/Checkout@v6:
+    ref: v6
     commit: sha1-8e8c483db84b4bee98b60c0593521ed34d9990e8
     owner_id: 1234
     repo_id: 5678
 workflows:
   .github/workflows/ci.yml:
-    - Actions/Checkout@v6:SHA1-8E8C483DB84B4BEE98B60C0593521ED34D9990E8
+    - Actions/Checkout@v6
 `
 	f, err := Parse([]byte(yaml))
 	require.NoError(t, err)
@@ -158,15 +158,15 @@ workflows:
 func TestParse_ConflictingActionKeyCasings(t *testing.T) {
 	// Two source-casings of the same pin with differing metadata is
 	// ambiguous and must be rejected.
-	yaml := `version: v0.0.1
+	yaml := `version: v0.0.2
 dependencies:
-  actions/checkout@v6:sha1-8e8c483db84b4bee98b60c0593521ed34d9990e8:
-    ref: v4
+  actions/checkout@v6:
+    ref: v6
     commit: sha1-8e8c483db84b4bee98b60c0593521ed34d9990e8
     owner_id: 1234
     repo_id: 5678
-  Actions/Checkout@v6:SHA1-8E8C483DB84B4BEE98B60C0593521ED34D9990E8:
-    ref: v4
+  Actions/Checkout@v6:
+    ref: v6
     commit: sha1-8e8c483db84b4bee98b60c0593521ed34d9990e8
     owner_id: 9999
     repo_id: 1
@@ -178,15 +178,15 @@ dependencies:
 
 func TestParse_DuplicateActionKeyCasingsSameMetadataOK(t *testing.T) {
 	// Same metadata on two casings collapses to one canonical entry.
-	yaml := `version: v0.0.1
+	yaml := `version: v0.0.2
 dependencies:
-  actions/checkout@v6:sha1-8e8c483db84b4bee98b60c0593521ed34d9990e8:
-    ref: v4
+  actions/checkout@v6:
+    ref: v6
     commit: sha1-8e8c483db84b4bee98b60c0593521ed34d9990e8
     owner_id: 1234
     repo_id: 5678
-  Actions/Checkout@v6:SHA1-8E8C483DB84B4BEE98B60C0593521ED34D9990E8:
-    ref: v4
+  Actions/Checkout@v6:
+    ref: v6
     commit: sha1-8e8c483db84b4bee98b60c0593521ed34d9990e8
     owner_id: 1234
     repo_id: 5678
@@ -196,10 +196,9 @@ dependencies:
 	assert.Len(t, f.Dependencies, 1)
 }
 
-func TestParse_UnparseableActionKeyPreserved(t *testing.T) {
-	// Garbage keys are preserved verbatim so structural diagnostics can
-	// surface them; Parse itself is not the validator.
-	yaml := `version: v0.0.1
+func TestParse_UnparseableActionKeyRejected(t *testing.T) {
+	// v0.0.2 rejects dependency keys that do not parse as valid pins.
+	input := `version: v0.0.2
 dependencies:
   "not a pin":
     ref: v4
@@ -207,15 +206,14 @@ dependencies:
     owner_id: 1
     repo_id: 2
 `
-	f, err := Parse([]byte(yaml))
-	require.NoError(t, err)
-	_, ok := f.Dependencies["not a pin"]
-	assert.True(t, ok)
+	_, err := Parse([]byte(input))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not a valid pin")
 }
 
 func TestParse_WorkflowPathKeyNotCanonicalized(t *testing.T) {
 	// File paths are case-sensitive on Linux; do not normalize them.
-	yaml := `version: v0.0.1
+	yaml := `version: v0.0.2
 dependencies: {}
 workflows:
   .github/workflows/CI.yml: []
@@ -227,14 +225,14 @@ workflows:
 }
 
 func TestParse_RefRoundTrip(t *testing.T) {
-	yaml := `version: v0.0.1
+	yaml := `version: v0.0.2
 dependencies:
-  actions/checkout@v6:sha1-8e8c483db84b4bee98b60c0593521ed34d9990e8:
+  actions/checkout@v6:
     ref: v6
     commit: sha1-8e8c483db84b4bee98b60c0593521ed34d9990e8
     owner_id: 1234
     repo_id: 5678
-  actions/internal@trunk:sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:
+  actions/internal@trunk:
     ref: trunk
     commit: sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     owner_id: 1
@@ -244,10 +242,10 @@ workflows: {}
 	f, err := Parse([]byte(yaml))
 	require.NoError(t, err)
 
-	withTag := f.Dependencies["actions/checkout@v6:sha1-8e8c483db84b4bee98b60c0593521ed34d9990e8"]
+	withTag := f.Dependencies["actions/checkout@v6"]
 	assert.Equal(t, "v6", withTag.Ref)
 
-	branchRef := f.Dependencies["actions/internal@trunk:sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
+	branchRef := f.Dependencies["actions/internal@trunk"]
 	assert.Equal(t, "trunk", branchRef.Ref)
 }
 
@@ -265,9 +263,9 @@ func TestParse_CommitEmptyStringRejected(t *testing.T) {
 	// commit:"" must be rejected: an empty commit SHA disables every downstream
 	// integrity check that reads Action.Commit, silently converting a
 	// required field into a no-op.
-	yaml := `version: v0.0.1
+	yaml := `version: v0.0.2
 dependencies:
-  actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:
+  actions/checkout@v4:
     ref: v4
     commit: ""
     owner_id: 1
@@ -297,8 +295,8 @@ func TestParse_CommitInvalidFormatRejected(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			y := "version: v0.0.1\ndependencies:\n" +
-				"  actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:\n" +
+			y := "version: v0.0.2\ndependencies:\n" +
+				"  actions/checkout@v4:\n" +
 				"    ref: v4\n" +
 				"    commit: " + tc.commit + "\n" +
 				"    owner_id: 1\n" +
@@ -317,45 +315,12 @@ func TestParse_CommitValidFormatsAccepted(t *testing.T) {
 	}
 	for _, commit := range cases {
 		t.Run(commit[:10], func(t *testing.T) {
-			pin := "actions/checkout@v4:" + commit
-			y := "version: v0.0.1\ndependencies:\n  " + pin + ":\n" +
+			y := "version: v0.0.2\ndependencies:\n  actions/checkout@v4:\n" +
 				"    ref: v4\n    commit: " + commit + "\n    owner_id: 1\n    repo_id: 1\n"
 			_, err := Parse([]byte(y))
 			require.NoError(t, err)
 		})
 	}
-}
-
-func TestParse_CommitMismatchWithPinKeyRejected(t *testing.T) {
-	// The commit field in the action body must match the digest embedded in
-	// the pin key. A mismatch is a trust-confusion attack: a consumer that
-	// checks action.Commit trusts a different hash than the pin key they
-	// used to look up the action.
-	yaml := `version: v0.0.1
-dependencies:
-  actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:
-    ref: v4
-    commit: sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-    owner_id: 1
-    repo_id: 1
-`
-	_, err := Parse([]byte(yaml))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "disagrees with pin key digest")
-}
-
-func TestParse_CommitMatchingPinKeyAccepted(t *testing.T) {
-	// When commit matches the pin key digest, parse must succeed.
-	yaml := `version: v0.0.1
-dependencies:
-  actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:
-    ref: v4
-    commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683
-    owner_id: 1
-    repo_id: 1
-`
-	_, err := Parse([]byte(yaml))
-	require.NoError(t, err)
 }
 
 func TestParse_WorkflowPathTraversalRejected(t *testing.T) {
@@ -376,7 +341,7 @@ func TestParse_WorkflowPathTraversalRejected(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			y := "version: v0.0.1\ndependencies: {}\nworkflows:\n  " + tc.key + ": []\n"
+			y := "version: v0.0.2\ndependencies: {}\nworkflows:\n  " + tc.key + ": []\n"
 			_, err := Parse([]byte(y))
 			require.Error(t, err, "workflow key %q should be rejected", tc.key)
 			assert.Contains(t, err.Error(), "workflow path key")
@@ -392,7 +357,7 @@ func TestParse_WorkflowPathLegitimateKeysAccepted(t *testing.T) {
 	}
 	for _, key := range legit {
 		t.Run(key, func(t *testing.T) {
-			y := "version: v0.0.1\ndependencies: {}\nworkflows:\n  " + key + ": []\n"
+			y := "version: v0.0.2\ndependencies: {}\nworkflows:\n  " + key + ": []\n"
 			_, err := Parse([]byte(y))
 			require.NoError(t, err)
 		})
@@ -421,8 +386,8 @@ func TestParse_RefInjectionCharsRejected(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			y := "version: v0.0.1\ndependencies:\n" +
-				"  actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:\n" +
+			y := "version: v0.0.2\ndependencies:\n" +
+				"  actions/checkout@v4:\n" +
 				"    ref: " + tc.yamlRef + "\n" +
 				"    commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683\n" +
 				"    owner_id: 1\n    repo_id: 1\n"
@@ -459,22 +424,22 @@ func TestParse_ExactMaxSizeAccepted(t *testing.T) {
 }
 
 func TestParse_UsesCycleRejected(t *testing.T) {
-	yaml := `version: v0.0.1
+	yaml := `version: v0.0.2
 dependencies:
-  actions/a@v1:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:
-    ref: v4
+  actions/a@v1:
+    ref: v1
     commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683
     owner_id: 1
     repo_id: 1
     uses:
-      - actions/b@v1:sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-  actions/b@v1:sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:
-    ref: v4
+      - actions/b@v1
+  actions/b@v1:
+    ref: v1
     commit: sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     owner_id: 2
     repo_id: 2
     uses:
-      - actions/a@v1:sha1-11bd71901bbe5b1630ceea73d27597364c9af683
+      - actions/a@v1
 `
 	_, err := Parse([]byte(yaml))
 	require.Error(t, err)
@@ -482,15 +447,15 @@ dependencies:
 }
 
 func TestParse_UsesSelfCycleRejected(t *testing.T) {
-	yaml := `version: v0.0.1
+	yaml := `version: v0.0.2
 dependencies:
-  actions/a@v1:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:
-    ref: v4
+  actions/a@v1:
+    ref: v1
     commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683
     owner_id: 1
     repo_id: 1
     uses:
-      - actions/a@v1:sha1-11bd71901bbe5b1630ceea73d27597364c9af683
+      - actions/a@v1
 `
 	_, err := Parse([]byte(yaml))
 	require.Error(t, err)
@@ -499,21 +464,163 @@ dependencies:
 
 func TestParse_UsesAcyclicAccepted(t *testing.T) {
 	// A valid DAG (A uses B, B has no uses) must parse successfully.
-	yaml := `version: v0.0.1
+	yaml := `version: v0.0.2
 dependencies:
-  actions/a@v1:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:
-    ref: v4
+  actions/a@v1:
+    ref: v1
     commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683
     owner_id: 1
     repo_id: 1
     uses:
-      - actions/b@v1:sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-  actions/b@v1:sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:
-    ref: v4
+      - actions/b@v1
+  actions/b@v1:
+    ref: v1
     commit: sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     owner_id: 2
     repo_id: 2
 `
 	_, err := Parse([]byte(yaml))
 	require.NoError(t, err)
+}
+
+func TestParse_KeyBodyRefMismatchRejected(t *testing.T) {
+	// The pin key says "@v4" but the body says ref: v3 — this must be
+	// rejected because the mismatch means the lockfile was hand-edited
+	// inconsistently and cannot be trusted.
+	yaml := `version: v0.0.2
+dependencies:
+  actions/checkout@v4:
+    ref: v3
+    commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683
+    owner_id: 1
+    repo_id: 1
+`
+	_, err := Parse([]byte(yaml))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not match pin key ref")
+	assert.Contains(t, err.Error(), `"v3"`)
+	assert.Contains(t, err.Error(), `"v4"`)
+}
+
+func TestParse_KeyBodyRefMatchAccepted(t *testing.T) {
+	// Key and body ref agree — must parse successfully.
+	yaml := `version: v0.0.2
+dependencies:
+  actions/checkout@v4:
+    ref: v4
+    commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683
+    owner_id: 1
+    repo_id: 1
+`
+	_, err := Parse([]byte(yaml))
+	require.NoError(t, err)
+}
+
+func TestParse_FullSHARefCommitMismatchRejected(t *testing.T) {
+	// Pin key ref is a full SHA but commit encodes a different digest.
+	input := `version: v0.0.2
+dependencies:
+  actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683:
+    ref: 11bd71901bbe5b1630ceea73d27597364c9af683
+    commit: sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    owner_id: 1
+    repo_id: 1
+`
+	_, err := Parse([]byte(input))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "commit digest")
+	assert.Contains(t, err.Error(), "does not match")
+}
+
+func TestParse_FullSHARefCommitMatchAccepted(t *testing.T) {
+	// Pin key ref is a full SHA and commit agrees — must parse.
+	input := `version: v0.0.2
+dependencies:
+  actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683:
+    ref: 11bd71901bbe5b1630ceea73d27597364c9af683
+    commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683
+    owner_id: 1
+    repo_id: 1
+`
+	_, err := Parse([]byte(input))
+	require.NoError(t, err)
+}
+
+func TestParse_SymbolicRefDifferentCommitAccepted(t *testing.T) {
+	// Symbolic ref (not a full SHA) — commit can be anything valid.
+	input := `version: v0.0.2
+dependencies:
+  actions/checkout@v4:
+    ref: v4
+    commit: sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    owner_id: 1
+    repo_id: 1
+`
+	_, err := Parse([]byte(input))
+	require.NoError(t, err)
+}
+
+func TestParse_ColonInRefRejected(t *testing.T) {
+	// Colons in refs are rejected by isValidRef (matching schema pin regex).
+	input := `version: v0.0.2
+dependencies:
+  actions/checkout@v4:
+    ref: "v4:foo"
+    commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683
+    owner_id: 1
+    repo_id: 1
+`
+	_, err := Parse([]byte(input))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsafe characters")
+}
+
+func TestParse_LegacyDigestSuffixedKeyRejected(t *testing.T) {
+	// Legacy v0.0.1 format used "owner/repo@ref:sha1-<hex>" as keys.
+	// v0.0.2 rejects these because the colon makes the ref invalid.
+	input := "version: v0.0.2\ndependencies:\n" +
+		"  \"actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683\":\n" +
+		"    ref: v4\n" +
+		"    commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683\n" +
+		"    owner_id: 1\n" +
+		"    repo_id: 1\n"
+	_, err := Parse([]byte(input))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not a valid pin")
+}
+
+func TestParse_LegacyDigestSuffixedUsesEntryRejected(t *testing.T) {
+	// Valid dependency key but its uses entry is a legacy digest-suffixed pin.
+	input := "version: v0.0.2\ndependencies:\n" +
+		"  actions/cache@v4:\n" +
+		"    ref: v4\n" +
+		"    commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683\n" +
+		"    owner_id: 1\n" +
+		"    repo_id: 1\n" +
+		"  actions/composite@v1:\n" +
+		"    ref: v1\n" +
+		"    commit: sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n" +
+		"    owner_id: 2\n" +
+		"    repo_id: 3\n" +
+		"    uses:\n" +
+		"      - \"actions/cache@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683\"\n"
+	_, err := Parse([]byte(input))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not a valid pin")
+}
+
+func TestParse_LegacyDigestSuffixedWorkflowDepRejected(t *testing.T) {
+	// Workflow dependency entries with legacy format are rejected.
+	input := "version: v0.0.2\ndependencies:\n" +
+		"  actions/checkout@v4:\n" +
+		"    ref: v4\n" +
+		"    commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683\n" +
+		"    owner_id: 1\n" +
+		"    repo_id: 1\n" +
+		"workflows:\n" +
+		"  .github/workflows/ci.yml:\n" +
+		"    - \"actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683\"\n"
+	_, err := Parse([]byte(input))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not a valid pin")
 }
