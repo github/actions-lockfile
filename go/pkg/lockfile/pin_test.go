@@ -15,42 +15,35 @@ func TestParsePin(t *testing.T) {
 	}{
 		{
 			name:  "owner repo",
-			entry: "actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683",
+			entry: "actions/checkout@v4",
 			want: Pin{
 				NWO:   "actions/checkout",
 				Owner: "actions",
 				Repo:  "checkout",
 				Ref:   "v4",
-				Algo:  "sha1",
-				Hex:   "11bd71901bbe5b1630ceea73d27597364c9af683",
 			},
 		},
 		{
-			name:  "sha256",
-			entry: "actions/checkout@v4:sha256-a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+			name:  "full SHA ref",
+			entry: "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
 			want: Pin{
 				NWO:   "actions/checkout",
 				Owner: "actions",
 				Repo:  "checkout",
-				Ref:   "v4",
-				Algo:  "sha256",
-				Hex:   "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+				Ref:   "11bd71901bbe5b1630ceea73d27597364c9af683",
 			},
 		},
 		{
 			// Monorepo sub-action tags (e.g. attest-build-provenance's
 			// predicate/) embed an '@' in the ref, producing a double-'@'
-			// key. The first '@' bounds the NWO and the last ':' bounds the
-			// digest, so the ref survives intact.
+			// key. The first '@' bounds the NWO and the rest is the ref.
 			name:  "ref containing at (monorepo sub-action tag)",
-			entry: "actions/attest-build-provenance@predicate@1.1.4:sha1-36fa7d009e22618ca7cd599486979b8150596c74",
+			entry: "actions/attest-build-provenance@predicate@1.1.4",
 			want: Pin{
 				NWO:   "actions/attest-build-provenance",
 				Owner: "actions",
 				Repo:  "attest-build-provenance",
 				Ref:   "predicate@1.1.4",
-				Algo:  "sha1",
-				Hex:   "36fa7d009e22618ca7cd599486979b8150596c74",
 			},
 		},
 	}
@@ -72,17 +65,13 @@ func TestParsePin_Invalid(t *testing.T) {
 		entry string
 	}{
 		{"empty", ""},
-		{"missing at", "actions/checkout:sha1-abc123"},
-		{"missing colon", "actions/checkout@v4sha1-abc123"},
-		{"missing algo dash", "actions/checkout@v4:sha1abc123"},
-		{"ref contains colon", "actions/checkout@refs/tags/v1:prod:sha1-11bd71901bbe5b1630ceea73d27597364c9af683"},
-		{"unsupported algo", "actions/checkout@v4:md5-098f6bcd4621d373cade4e832627b4f6"},
-		{"sha1 too short", "actions/checkout@v4:sha1-abc123"},
-		{"empty owner", "/checkout@v4:sha1-abc123"},
-		{"empty repo", "actions/@v4:sha1-abc123"},
-		{"sub-action path rejected", "actions/cache/save@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683"},
-		{"deep sub-action path rejected", "owner/repo/a/b@v1:sha1-11bd71901bbe5b1630ceea73d27597364c9af683"},
-		{"with metadata suffix (pins are pure identity)", "actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683;owner_id=1234"},
+		{"missing at", "actions/checkout"},
+		{"empty owner", "/@v4"},
+		{"empty repo", "actions/@v4"},
+		{"sub-action path rejected", "actions/cache/save@v4"},
+		{"deep sub-action path rejected", "owner/repo/a/b@v1"},
+		{"colon in ref rejected", "actions/checkout@v4:foo"},
+		{"colon only ref rejected", "actions/checkout@:"},
 	}
 
 	for _, tt := range tests {
@@ -90,7 +79,6 @@ func TestParsePin_Invalid(t *testing.T) {
 			got, ok := ParsePin(tt.entry)
 			assert.False(t, ok)
 			assert.Equal(t, Pin{}, got)
-
 		})
 	}
 }
@@ -125,31 +113,6 @@ func TestPin_IndexKey(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, tt.pin.IndexKey())
-		})
-	}
-}
-
-func TestParsePin_RefInjectionRejected(t *testing.T) {
-	// ParsePin must reject refs containing characters that are unsafe for
-	// URL paths and GraphQL string literals (spaces, quotes, backticks,
-	// backslash). Without this check a caller receives a Pin.Ref that
-	// injects into downstream shell commands or API calls.
-	cases := []struct {
-		name  string
-		input string
-	}{
-		{"space in ref", "actions/checkout@v4 evil:sha1-11bd71901bbe5b1630ceea73d27597364c9af683"},
-		{"tab in ref", "actions/checkout@v4\tevil:sha1-11bd71901bbe5b1630ceea73d27597364c9af683"},
-		{"double-quote in ref", "actions/checkout@v4\"evil:sha1-11bd71901bbe5b1630ceea73d27597364c9af683"},
-		{"single-quote in ref", "actions/checkout@v4'evil:sha1-11bd71901bbe5b1630ceea73d27597364c9af683"},
-		{"backtick in ref", "actions/checkout@v4`evil:sha1-11bd71901bbe5b1630ceea73d27597364c9af683"},
-		{"backslash in ref", "actions/checkout@v4\\evil:sha1-11bd71901bbe5b1630ceea73d27597364c9af683"},
-		{"dotdot in ref", "actions/checkout@../evil:sha1-11bd71901bbe5b1630ceea73d27597364c9af683"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			_, ok := ParsePin(tc.input)
-			assert.False(t, ok, "ParsePin should reject ref with injection chars: %q", tc.input)
 		})
 	}
 }

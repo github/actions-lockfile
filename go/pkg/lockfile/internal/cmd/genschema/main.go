@@ -9,7 +9,11 @@ import (
 )
 
 func main() {
-	schema, err := os.ReadFile("../../../schema/lockfile-v0.0.1.json")
+	schemaV001, err := os.ReadFile("../../../schema/lockfile-v0.0.1.json")
+	if err != nil {
+		panic(err)
+	}
+	schemaV002, err := os.ReadFile("../../../schema/lockfile-v0.0.2.json")
 	if err != nil {
 		panic(err)
 	}
@@ -19,7 +23,8 @@ func main() {
 	fmt.Fprintln(&out)
 	fmt.Fprintln(&out, "package lockfile")
 	fmt.Fprintln(&out)
-	fmt.Fprintf(&out, "const schemaV001 = %s\n", strconv.Quote(string(schema)))
+	fmt.Fprintf(&out, "const schemaV001 = %s\n\n", strconv.Quote(string(schemaV001)))
+	fmt.Fprintf(&out, "const schemaV002 = %s\n", strconv.Quote(string(schemaV002)))
 
 	formatted, err := format.Source(out.Bytes())
 	if err != nil {

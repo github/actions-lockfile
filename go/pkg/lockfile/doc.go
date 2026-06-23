@@ -33,11 +33,9 @@
 // # Security note for contributors
 //
 // owner/repo/path components pass isValidSegment (fixed character set,
-// ".."/"." barred) before reaching any URL or GraphQL builder. The ref is
-// validated by a denylist rather than an allowlist because git refs carry
-// slashes, dots, and embedded @; isValidRef only ensures the ref cannot escape
-// a quoted string or smuggle a path traversal. A ref still needs escaping
-// before use in URL paths. These validators are hand-rolled, allocation-free,
-// and single-pass because they run on the hot path. Do not replace them with
-// regular expressions.
+// ".."/"." barred) before reaching any URL or GraphQL builder. Ref validation
+// is minimal (non-empty, no colons) — the workflow parser itself does no ref
+// character validation, so neither do we. These validators are hand-rolled,
+// allocation-free, and single-pass because they run on the hot path. Do not
+// replace them with regular expressions.
 package lockfile
