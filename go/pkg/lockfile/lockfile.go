@@ -495,20 +495,6 @@ func rejectZeroValues(action *yaml.Node, dep string) *ParseError {
 			}
 		}
 
-		// ref values are used in GraphQL queries, log output, and
-		// sometimes shell commands by consumers. Validate with the same
-		// denylist that ParseActionRef applies to refs so that a crafted
-		// lockfile cannot arm a downstream injection through this field.
-		if key.Value == "ref" && val.Value != "" {
-			if !isValidRef(val.Value) {
-				return &ParseError{
-					Line:   val.Line,
-					Column: val.Column,
-					Msg:    fmt.Sprintf("action field %q contains unsafe characters for dependency %q: %q", key.Value, dep, val.Value),
-				}
-			}
-		}
-
 		if _, ok := positiveIntKeys[key.Value]; ok {
 			n, err := strconv.ParseInt(val.Value, 10, 64)
 			if err != nil || n <= 0 {

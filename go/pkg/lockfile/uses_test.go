@@ -47,13 +47,8 @@ func TestParseActionRef(t *testing.T) {
 		{name: "dotdot repo segment", input: "foo/..@v1", wantNil: true},
 		{name: "dot repo segment", input: "foo/.@v1", wantNil: true},
 		{name: "dot owner segment", input: "./repo@v1", wantNil: true},
-		{name: "ref with double quote", input: `a/b@v1"inj`, wantNil: true},
-		{name: "ref with space", input: "a/b@v1 space", wantNil: true},
-		{name: "ref with single quote", input: "a/b@v1'inj", wantNil: true},
-		{name: "ref with backtick", input: "a/b@v1`inj", wantNil: true},
-		{name: "ref with backslash", input: `a/b@v1\inj`, wantNil: true},
-		{name: "ref with dotdot traversal", input: "a/b@heads/../../x", wantNil: true},
-		{name: "ref with consecutive dots", input: "a/b@v1..v2", wantNil: true},
+		// Refs are not validated beyond structural checks (colons for pin
+		// grammar). The workflow parser accepts any characters in refs.
 	}
 
 	for _, tt := range tests {
@@ -108,8 +103,6 @@ func TestParseReusableWorkflowRef(t *testing.T) {
 		// Security boundary still applies.
 		{name: "local reusable workflow", input: "./.github/workflows/ci.yml@v1", wantNil: true},
 		{name: "expression ref", input: "${{ matrix.wf }}@v1", wantNil: true},
-		{name: "ref injection double quote", input: `octo/repo/.github/workflows/ci.yml@v1"inj`, wantNil: true},
-		{name: "ref injection space", input: "octo/repo/.github/workflows/ci.yml@v1 x", wantNil: true},
 		{name: "path traversal in workflow path", input: "octo/repo/.github/workflows/../../x.yml@v1", wantNil: true},
 		{name: "empty ref", input: "octo/repo/.github/workflows/ci.yml@", wantNil: true},
 		{name: "control char in path", input: "octo/repo/.github/workflows/ci\t.yml@v1", wantNil: true},

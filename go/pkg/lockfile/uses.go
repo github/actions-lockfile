@@ -110,9 +110,6 @@ func splitUsesRef(uses string) *usesRef {
 		return nil
 	}
 	ref := atParts[1]
-	if !isValidRef(ref) {
-		return nil
-	}
 
 	segments := strings.SplitN(atParts[0], "/", 3)
 	if len(segments) < 2 || segments[0] == "" || segments[1] == "" {
@@ -230,26 +227,13 @@ func isValidSegment(s string) bool {
 	return true
 }
 
-// isValidRef gates the ref (the part after @). Git refs are permissive —
-// slashes, dots, plus signs, even an embedded @ (foo/bar@a@b -> ref "a@b") —
-// so this is a denylist, not an allowlist. It rejects what cannot survive
-// interpolation: whitespace, quotes, backtick, backslash, and the ".."
-// sequence (which git itself forbids, so no valid ref is lost). It does NOT
-// make the ref URL-path-safe; refs hold slashes. Escape downstream.
+// isValidRef gates the ref (the part after @). Only rejects empty refs and
+// colons (which would be ambiguous with the legacy pin key separator).
 func isValidRef(ref string) bool {
 	if ref == "" {
 		return false
 	}
-	if strings.Contains(ref, "..") {
-		return false
-	}
-	for _, r := range ref {
-		switch r {
-		case ' ', '\t', '\n', '\r', '\v', '\f', '"', '\'', '`', '\\', ':':
-			return false
-		}
-	}
-	return true
+	return !strings.Contains(ref, ":")
 }
 
 func containsControlChars(s string) bool {

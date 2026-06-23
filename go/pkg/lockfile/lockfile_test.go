@@ -364,40 +364,6 @@ func TestParse_WorkflowPathLegitimateKeysAccepted(t *testing.T) {
 	}
 }
 
-func TestParse_RefInjectionCharsRejected(t *testing.T) {
-	// ref values are used in GraphQL queries, log output, and sometimes
-	// shell commands. Characters that survive YAML parsing but are unsafe
-	// for downstream interpolation (backslash, `..`, whitespace) must be
-	// rejected by our validator.
-	cases := []struct {
-		name    string
-		yamlRef string // value as it appears in YAML (double-quoted to reach our validator)
-	}{
-		// YAML double-quoted escape \\ → literal backslash in parsed value
-		{"backslash", `"main\\evil"`},
-		// YAML double-quoted \t → literal tab
-		{"tab", `"main\tevil"`},
-		// YAML double-quoted \n → literal newline
-		{"newline", `"main\nevil"`},
-		// unquoted dotdot traversal
-		{"dotdot", "../main"},
-		// path traversal with semicolons
-		{"semicolon traversal", `"../../etc/passwd; rm -rf /"`},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			y := "version: v0.0.2\ndependencies:\n" +
-				"  actions/checkout@v4:\n" +
-				"    ref: " + tc.yamlRef + "\n" +
-				"    commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683\n" +
-				"    owner_id: 1\n    repo_id: 1\n"
-			_, err := Parse([]byte(y))
-			require.Error(t, err, "ref %q should be rejected", tc.yamlRef)
-			assert.Contains(t, err.Error(), "unsafe characters")
-		})
-	}
-}
-
 func TestParse_OversizedInputRejected(t *testing.T) {
 	// An input larger than MaxParseSize must be rejected before any YAML
 	// parsing so that memory-exhaustion DoS from oversized documents is
@@ -561,7 +527,7 @@ dependencies:
 }
 
 func TestParse_ColonInRefRejected(t *testing.T) {
-	// Colons in refs are rejected by isValidRef (matching schema pin regex).
+	// Colons in refs cause a pin key mismatch (pin key ref is "v4" but body ref is "v4:foo").
 	input := `version: v0.0.2
 dependencies:
   actions/checkout@v4:
@@ -572,7 +538,7 @@ dependencies:
 `
 	_, err := Parse([]byte(input))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unsafe characters")
+	assert.Contains(t, err.Error(), "does not match pin key ref")
 }
 
 func TestParse_LegacyDigestSuffixedKeyRejected(t *testing.T) {

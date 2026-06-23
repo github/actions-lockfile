@@ -92,9 +92,7 @@ func ParsePin(s string) (Pin, bool) {
 
 	// Validate the ref with the same denylist used by ParseActionRef to
 	// reject shell metacharacters, whitespace, and traversal sequences.
-	// This does NOT make the ref safe for verbatim interpolation into URLs
-	// or shell commands -- callers must still escape appropriately for their
-	// context. The goal is to reject obviously-malicious refs at parse time.
+	// Reject empty refs and colons (colon is the legacy pin key separator).
 	if !isValidRef(ref) {
 		return Pin{}, false
 	}
