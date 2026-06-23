@@ -466,10 +466,8 @@ var positiveIntKeys = map[string]struct{}{
 // rejectZeroValues checks that required action fields carry meaningful values:
 // the "commit" field must be non-empty and a valid algo-hex digest string,
 // integer ID fields like "owner_id" and "repo_id" must be positive, and
-// the "ref" field (when present) must not contain characters that are unsafe
-// for downstream interpolation. A present-but-zero-value or injection-bearing
-// field would silently disable the security check it's meant to enforce, or
-// arm a downstream injection.
+// string fields in nonEmptyStringKeys must not be blank. A present-but-zero
+// value would silently disable the security check it's meant to enforce.
 func rejectZeroValues(action *yaml.Node, dep string) *ParseError {
 	for j := 0; j+1 < len(action.Content); j += 2 {
 		key := action.Content[j]
@@ -572,7 +570,7 @@ func rejectFullSHACommitMismatch(pinKey, action *yaml.Node) *ParseError {
 // would be ambiguous about which Action metadata applies. On conflict it
 // returns the offending source key so callers can locate it in the YAML tree.
 //
-// Dependency keys and Uses entries that do not parse as valid v0.0.1 pin
+// Dependency keys and Uses entries that do not parse as valid v0.0.2 pin
 // strings (OWNER/REPO@REF) are rejected — this catches legacy
 // digest-suffixed keys (owner/repo@ref:sha1-...) that are invalid under
 // the current schema.
@@ -629,7 +627,7 @@ func equalAction(a, b Action) bool {
 
 // canonicalizeWorkflowDependencies rewrites every workflow's pin list to
 // canonical pin strings (Pin.String()) so lookups into the Dependencies map are
-// casing-agnostic. Entries that do not parse as valid v0.0.1 pin strings are
+// casing-agnostic. Entries that do not parse as valid v0.0.2 pin strings are
 // rejected — legacy digest-suffixed pins and other malformed values are not
 // preserved.
 func canonicalizeWorkflowDependencies(f *File) (string, string, error) {

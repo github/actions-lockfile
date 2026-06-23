@@ -110,6 +110,9 @@ func splitUsesRef(uses string) *usesRef {
 		return nil
 	}
 	ref := atParts[1]
+	if !isValidRef(ref) {
+		return nil
+	}
 
 	segments := strings.SplitN(atParts[0], "/", 3)
 	if len(segments) < 2 || segments[0] == "" || segments[1] == "" {

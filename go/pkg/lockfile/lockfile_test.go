@@ -197,7 +197,7 @@ dependencies:
 }
 
 func TestParse_UnparseableActionKeyRejected(t *testing.T) {
-	// v0.0.1 rejects dependency keys that do not parse as valid pins.
+	// v0.0.2 rejects dependency keys that do not parse as valid pins.
 	input := `version: v0.0.2
 dependencies:
   "not a pin":

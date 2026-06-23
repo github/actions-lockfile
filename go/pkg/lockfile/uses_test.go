@@ -49,6 +49,7 @@ func TestParseActionRef(t *testing.T) {
 		{name: "dot owner segment", input: "./repo@v1", wantNil: true},
 		// Refs are not validated beyond structural checks (colons for pin
 		// grammar). The workflow parser accepts any characters in refs.
+		{name: "ref with colon rejected", input: "a/b@v1:foo", wantNil: true},
 	}
 
 	for _, tt := range tests {
