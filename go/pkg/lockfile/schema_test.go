@@ -1,0 +1,389 @@
+package lockfile
+
+import (
+	"encoding/json"
+	"errors"
+	"os"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestSchema_EmbeddedMatchesRootInvariant(t *testing.T) {
+	for _, ver := range []struct {
+		version string
+		file    string
+	}{
+		{"v0.0.1", "../../../schema/lockfile-v0.0.1.json"},
+		{"v0.0.2", "../../../schema/lockfile-v0.0.2.json"},
+	} {
+		t.Run(ver.version, func(t *testing.T) {
+			rootSchema, err := os.ReadFile(ver.file)
+			if errors.Is(err, os.ErrNotExist) {
+				t.Skip("root schema invariant is not present in this module checkout")
+			}
+			require.NoError(t, err)
+			embedded, ok := SchemaForVersion(ver.version)
+			require.True(t, ok, "SchemaForVersion(%q) returned false", ver.version)
+			assert.JSONEq(t, string(rootSchema), embedded)
+		})
+	}
+}
+
+// TestSchema_EmbeddedMatchesEnforcement guards against drift between the
+// published JSON Schema and the keys Parse actually enforces. The schema file
+// is the contract; validateKnownFields is the engine. If they disagree, the
+// lockfile would either silently accept fields the schema forbids or reject
+// fields it permits.
+func TestSchema_EmbeddedMatchesEnforcement(t *testing.T) {
+	var doc struct {
+		Properties map[string]struct {
+			Const string `json:"const"`
+		} `json:"properties"`
+		Defs struct {
+			Action struct {
+				Required   []string                   `json:"required"`
+				Properties map[string]json.RawMessage `json:"properties"`
+			} `json:"action"`
+		} `json:"$defs"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(Schema()), &doc), "embedded schema must be valid JSON")
+
+	require.Equal(t, Version, doc.Properties["version"].Const,
+		"schema version const must equal the supported Version")
+
+	for key := range doc.Properties {
+		_, ok := allowedFileKeys[key]
+		assert.Truef(t, ok, "schema declares top-level %q but enforcement does not allow it", key)
+	}
+	for key := range allowedFileKeys {
+		_, ok := doc.Properties[key]
+		assert.Truef(t, ok, "enforcement allows top-level %q but schema does not declare it", key)
+	}
+
+	for key := range doc.Defs.Action.Properties {
+		_, ok := allowedActionKeys[key]
+		assert.Truef(t, ok, "schema declares action field %q but enforcement does not allow it", key)
+	}
+	for key := range allowedActionKeys {
+		_, ok := doc.Defs.Action.Properties[key]
+		assert.Truef(t, ok, "enforcement allows action field %q but schema does not declare it", key)
+	}
+
+	assert.ElementsMatch(t, doc.Defs.Action.Required, requiredActionKeys,
+		"schema action.required must match the keys enforcement requires")
+}
+
+func TestParse_UnknownTopLevelFieldRejected(t *testing.T) {
+	yaml := `version: v0.0.2
+dependencies: {}
+typo_section: {}
+`
+	_, err := Parse([]byte(yaml))
+	require.Error(t, err)
+
+	var pe *ParseError
+	require.True(t, errors.As(err, &pe), "expected a *ParseError, got %T", err)
+	assert.Contains(t, pe.Msg, `unknown lockfile field "typo_section"`)
+	assert.Equal(t, 3, pe.Line, "unknown key is on line 3")
+	assert.Greater(t, pe.Column, 0, "expected a column anchored on the offending key")
+}
+
+func TestParse_UnknownActionFieldRejected(t *testing.T) {
+	yaml := `version: v0.0.2
+dependencies:
+  actions/checkout@v4:
+    owner_id: 1
+    repo_id: 2
+    flavor: spicy
+`
+	_, err := Parse([]byte(yaml))
+	require.Error(t, err)
+
+	var pe *ParseError
+	require.True(t, errors.As(err, &pe), "expected a *ParseError, got %T", err)
+	assert.Contains(t, pe.Msg, `unknown action field "flavor"`)
+	assert.Contains(t, pe.Msg, "actions/checkout@v4", "message should name the offending dependency")
+	assert.Equal(t, 6, pe.Line, "unknown action key is on line 6")
+	assert.Greater(t, pe.Column, 0, "expected a column anchored on the offending key")
+}
+
+func TestParse_MissingRequiredActionFieldRejected(t *testing.T) {
+	// commit/owner_id/repo_id present, but ref (required) is absent.
+	yaml := `version: v0.0.2
+dependencies:
+  actions/checkout@v4:
+    commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
+    owner_id: 1
+    repo_id: 2
+`
+	_, err := Parse([]byte(yaml))
+	require.Error(t, err)
+
+	var pe *ParseError
+	require.True(t, errors.As(err, &pe), "expected a *ParseError, got %T", err)
+	assert.Contains(t, pe.Msg, `missing required action field "ref"`)
+	assert.Contains(t, pe.Msg, "actions/checkout@v4", "message should name the offending dependency")
+	assert.Equal(t, 3, pe.Line, "error anchors on the dependency's pin key")
+	assert.Greater(t, pe.Column, 0, "expected a column anchored on the pin key")
+}
+
+func TestParse_EmptyCommitRejected(t *testing.T) {
+	yaml := `version: v0.0.2
+dependencies:
+  actions/checkout@v4:
+    ref: v4
+    commit: ""
+    owner_id: 1
+    repo_id: 2
+`
+	_, err := Parse([]byte(yaml))
+	require.Error(t, err)
+
+	var pe *ParseError
+	require.True(t, errors.As(err, &pe), "expected a *ParseError, got %T", err)
+	assert.Contains(t, pe.Msg, `"commit"`)
+	assert.Contains(t, pe.Msg, "must not be empty")
+}
+
+func TestParse_ZeroOwnerIDRejected(t *testing.T) {
+	yaml := `version: v0.0.2
+dependencies:
+  actions/checkout@v4:
+    ref: v4
+    commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
+    owner_id: 0
+    repo_id: 2
+`
+	_, err := Parse([]byte(yaml))
+	require.Error(t, err)
+
+	var pe *ParseError
+	require.True(t, errors.As(err, &pe), "expected a *ParseError, got %T", err)
+	assert.Contains(t, pe.Msg, `"owner_id"`)
+	assert.Contains(t, pe.Msg, "must be a positive integer")
+}
+
+func TestParse_ZeroRepoIDRejected(t *testing.T) {
+	yaml := `version: v0.0.2
+dependencies:
+  actions/checkout@v4:
+    ref: v4
+    commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
+    owner_id: 1
+    repo_id: 0
+`
+	_, err := Parse([]byte(yaml))
+	require.Error(t, err)
+
+	var pe *ParseError
+	require.True(t, errors.As(err, &pe), "expected a *ParseError, got %T", err)
+	assert.Contains(t, pe.Msg, `"repo_id"`)
+	assert.Contains(t, pe.Msg, "must be a positive integer")
+}
+
+func TestParse_NegativeIDRejected(t *testing.T) {
+	yaml := `version: v0.0.2
+dependencies:
+  actions/checkout@v4:
+    ref: v4
+    commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
+    owner_id: -1
+    repo_id: 2
+`
+	_, err := Parse([]byte(yaml))
+	require.Error(t, err)
+
+	var pe *ParseError
+	require.True(t, errors.As(err, &pe), "expected a *ParseError, got %T", err)
+	assert.Contains(t, pe.Msg, `"owner_id"`)
+	assert.Contains(t, pe.Msg, "must be a positive integer")
+}
+
+func TestParse_KnownFieldsAccepted(t *testing.T) {
+	yaml := `version: v0.0.2
+workflows:
+  .github/workflows/ci.yml:
+    - actions/checkout@v4
+dependencies:
+  actions/checkout@v4:
+    ref: v4
+    commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
+    owner_id: 1
+    repo_id: 2
+    uses:
+      - actions/cache@v4
+`
+	f, err := Parse([]byte(yaml))
+	require.NoError(t, err)
+	assert.Len(t, f.Dependencies, 1)
+	assert.Contains(t, f.Workflows, ".github/workflows/ci.yml")
+}
+
+// corruptLockfile is a shared fixture for scoped-validation tests.
+// It has two deps: goodPin is valid, corruptPin is missing the required
+// "commit" field. Workflow A references only the good dep, workflow B
+// references only the corrupt dep.
+const (
+	goodPin    = "actions/checkout@v4"
+	corruptPin = "actions/setup-go@v5"
+
+	corruptLockfile = `version: v0.0.2
+workflows:
+  .github/workflows/a.yml:
+    - actions/checkout@v4
+  .github/workflows/b.yml:
+    - actions/setup-go@v5
+dependencies:
+  actions/checkout@v4:
+    ref: v4
+    commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
+    owner_id: 1
+    repo_id: 2
+  actions/setup-go@v5:
+    ref: v5
+    owner_id: 3
+    repo_id: 4
+`
+)
+
+func TestParse_ScopedValidation_NoPaths_ErrorsOnCorruptEntry(t *testing.T) {
+	_, err := Parse([]byte(corruptLockfile))
+	require.Error(t, err)
+
+	var pe *ParseError
+	require.True(t, errors.As(err, &pe))
+	assert.Contains(t, pe.Msg, `missing required action field "commit"`)
+	assert.Contains(t, pe.Msg, corruptPin)
+}
+
+func TestParse_ScopedValidation_GoodPathOnly_OK(t *testing.T) {
+	f, err := Parse([]byte(corruptLockfile), ".github/workflows/a.yml")
+	require.NoError(t, err)
+	assert.Len(t, f.Dependencies, 2, "both deps should be present even though only one was validated")
+}
+
+func TestParse_ScopedValidation_CorruptPathOnly_Errors(t *testing.T) {
+	_, err := Parse([]byte(corruptLockfile), ".github/workflows/b.yml")
+	require.Error(t, err)
+
+	var pe *ParseError
+	require.True(t, errors.As(err, &pe))
+	assert.Contains(t, pe.Msg, `missing required action field "commit"`)
+	assert.Contains(t, pe.Msg, corruptPin)
+}
+
+func TestParse_ScopedValidation_AbsentPath_FailOpen(t *testing.T) {
+	f, err := Parse([]byte(corruptLockfile), ".github/workflows/c.yml")
+	require.NoError(t, err)
+	assert.Len(t, f.Dependencies, 2)
+}
+
+func TestParse_ScopedValidation_GoodAndCorruptPaths_Errors(t *testing.T) {
+	_, err := Parse([]byte(corruptLockfile), ".github/workflows/a.yml", ".github/workflows/b.yml")
+	require.Error(t, err)
+
+	var pe *ParseError
+	require.True(t, errors.As(err, &pe))
+	assert.Contains(t, pe.Msg, `missing required action field "commit"`)
+}
+
+func TestParse_ScopedValidation_UnknownActionField_InScope_Errors(t *testing.T) {
+	data := `version: v0.0.2
+workflows:
+  .github/workflows/a.yml:
+    - actions/checkout@v4
+dependencies:
+  actions/checkout@v4:
+    ref: v4
+    commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
+    owner_id: 1
+    repo_id: 2
+    flavor: spicy
+`
+	_, err := Parse([]byte(data), ".github/workflows/a.yml")
+	require.Error(t, err)
+
+	var pe *ParseError
+	require.True(t, errors.As(err, &pe))
+	assert.Contains(t, pe.Msg, `unknown action field "flavor"`)
+}
+
+func TestParse_ScopedValidation_UnknownActionField_OutOfScope_OK(t *testing.T) {
+	data := `version: v0.0.2
+workflows:
+  .github/workflows/b.yml:
+    - actions/checkout@v4
+dependencies:
+  actions/checkout@v4:
+    ref: v4
+    commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
+    owner_id: 1
+    repo_id: 2
+    flavor: spicy
+`
+	// "a.yml" is not in the workflows map, so the dep is out of scope.
+	_, err := Parse([]byte(data), ".github/workflows/a.yml")
+	require.NoError(t, err)
+}
+
+func TestParse_ScopedValidation_ZeroValue_InScope_Errors(t *testing.T) {
+	data := `version: v0.0.2
+workflows:
+  .github/workflows/a.yml:
+    - actions/checkout@v4
+dependencies:
+  actions/checkout@v4:
+    ref: v4
+    commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
+    owner_id: 0
+    repo_id: 2
+`
+	_, err := Parse([]byte(data), ".github/workflows/a.yml")
+	require.Error(t, err)
+
+	var pe *ParseError
+	require.True(t, errors.As(err, &pe))
+	assert.Contains(t, pe.Msg, `"owner_id"`)
+	assert.Contains(t, pe.Msg, "must be a positive integer")
+}
+
+func TestParse_ScopedValidation_ZeroValue_OutOfScope_OK(t *testing.T) {
+	data := `version: v0.0.2
+workflows:
+  .github/workflows/a.yml:
+    - actions/checkout@v4
+dependencies:
+  actions/checkout@v4:
+    ref: v4
+    commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
+    owner_id: 0
+    repo_id: 2
+`
+	// Ask for a path that doesn't reference this dep.
+	_, err := Parse([]byte(data), ".github/workflows/other.yml")
+	require.NoError(t, err)
+}
+
+func TestParse_ScopedValidation_UnknownTopLevel_StillErrors(t *testing.T) {
+	data := `version: v0.0.2
+typo_section: {}
+dependencies: {}
+`
+	_, err := Parse([]byte(data), ".github/workflows/a.yml")
+	require.Error(t, err)
+
+	var pe *ParseError
+	require.True(t, errors.As(err, &pe))
+	assert.Contains(t, pe.Msg, `unknown lockfile field "typo_section"`)
+}
+
+func TestParse_ScopedValidation_BadVersion_StillErrors(t *testing.T) {
+	data := `version: garbage
+dependencies: {}
+`
+	_, err := Parse([]byte(data), ".github/workflows/a.yml")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported dependency lockfile version")
+}

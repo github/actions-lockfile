@@ -1,0 +1,16 @@
+# Build output
+gh-actions-lockfile
+
+# Runner source (vendor locally, don't commit)
+runner/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+
+# Test artifacts
+*.bak

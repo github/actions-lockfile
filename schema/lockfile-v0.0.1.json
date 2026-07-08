@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gh.io/actions-lockfile/v0.0.1.json",
+  "title": "GitHub Actions dependency lockfile",
+  "description": "Machine-generated lockfile describing the pinned action dependency graph for a repository's workflows. Written and updated by `gh actions-lock`.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version"],
+  "properties": {
+    "version": {
+      "description": "Lockfile schema version. Only v0.0.1 is supported.",
+      "const": "v0.0.1"
+    },
+    "workflows": {
+      "description": "Map of repo-relative workflow path to the flat, transitive list of canonical pin keys it depends on.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "$ref": "#/$defs/pin" }
+      }
+    },
+    "dependencies": {
+      "description": "Deduplicated action graph keyed by canonical pin. Each entry records the resolved metadata for one action tarball.",
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/action" }
+    }
+  },
+  "$defs": {
+    "pin": {
+      "description": "Canonical dependency pin: OWNER/REPO@REF:ALGO-HEX (e.g. actions/checkout@v4:sha1-abc123...).",
+      "type": "string",
+      "pattern": "^[^/@:]+/[^/@:]+@[^:]+:(sha1|sha256)-[a-f0-9]+$"
+    },
+    "action": {
+      "description": "Resolved metadata for a single pinned action.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "owner_id", "repo_id"],
+      "properties": {
+        "tag": {
+          "description": "The tag the commit was resolved from, if any.",
+          "type": "string"
+        },
+        "branch": {
+          "description": "The branch the commit was resolved from, if no tag was available.",
+          "type": "string"
+        },
+        "commit": {
+          "description": "The exact commit the action resolves to, in algo-prefixed digest form (e.g. sha1-...).",
+          "type": "string"
+        },
+        "owner_id": {
+          "description": "The numeric ID of the action's owner (user or org).",
+          "type": "integer",
+          "minimum": 1
+        },
+        "repo_id": {
+          "description": "The numeric ID of the action's repository.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "uses": {
+          "description": "The action's own direct dependencies, as canonical pin keys.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/pin" }
+        }
+      }
+    }
+  }
+}
