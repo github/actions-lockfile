@@ -1,0 +1,17 @@
+version: 2
+updates:
+  # Go module (lives under go/)
+  - package-ecosystem: gomod
+    directory: /go
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: gomod
+
+  # GitHub Actions workflows (.github/workflows)
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: actions
