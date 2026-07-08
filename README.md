@@ -11,6 +11,15 @@ format, plus a Go parser for it. The lockfile records the resolved transitive
 dependency graph for a repository's workflows so tools can audit and verify the
 exact action pins in use.
 
+## Background
+
+This project provides the shared, authoritative lockfile format that GitHub
+Actions tooling uses to record and verify resolved dependency pins. It is part
+of GitHub's broader Workflow Dependency Pinning effort, and the schema and
+parser will continue to evolve toward a stable `v1.0.0`.
+
+Contributions are welcome — see [CONTRIBUTING.md](./CONTRIBUTING.md).
+
 ## Installation
 
 ```sh
@@ -149,6 +158,17 @@ Schema changes (any modification to `schema/lockfile-vX.Y.Z.json`, generated
 language bindings, or the fields emitted in `dependencies` / `workflows`)
 require coordination with `github/gh-actions-lock` because the CLI is the
 schema's primary producer.
+
+## Support
+
+This project is supported on a best-effort, community basis. Please file
+issues for bugs and questions; see [SUPPORT.md](./SUPPORT.md) for details on
+what to expect and how to get help.
+
+## Maintainers
+
+This repository is maintained by @github/actions-dispatch-reviewers
+(see [CODEOWNERS](./CODEOWNERS)).
 
 ## License
 
