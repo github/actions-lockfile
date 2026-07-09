@@ -6,6 +6,9 @@ workflows:
     '.github/workflows/ci.yml':
         - 'actions/checkout@v4.3.1'
         - 'actions/setup-go@v5.6.0'
+    '.github/workflows/dependency-review.yml':
+        - 'actions/checkout@v4.3.1'
+        - 'actions/dependency-review-action@v4.9.0'
     '.github/workflows/release.yml':
         - 'actions/checkout@v4.3.1'
         - 'actions/setup-go@v5.6.0'
@@ -15,6 +18,11 @@ dependencies:
         commit: 'sha1-34e114876b0b11c390a56381ad16ebd13914f8d5'
         owner_id: 44036562
         repo_id: 197814629
+    'actions/dependency-review-action@v4.9.0':
+        ref: 'v4.9.0'
+        commit: 'sha1-2031cfc080254a8a887f58cffee85186f0e49e48'
+        owner_id: 44036562
+        repo_id: 476372928
     'actions/setup-go@v5.6.0':
         ref: 'v5.6.0'
         commit: 'sha1-40f1582b2485089dde7abd97c1529aa768e1baff'
