@@ -16,8 +16,8 @@ func TestSplitRef(t *testing.T) {
 		{"v4.3.1", "v4.3.1", ""},
 		{"v1.0.0", "v1.0.0", ""},
 		{"1.2.3", "1.2.3", ""},
-		{"v4", "v4", ""},           // major-only is still stable semver
-		{"v4.2", "v4.2", ""},       // major.minor is still stable semver
+		{"v4", "v4", ""},                       // major-only is still stable semver
+		{"v4.2", "v4.2", ""},                   // major.minor is still stable semver
 		{"v1.0.0-beta.1", "", "v1.0.0-beta.1"}, // pre-release → branch
 		{"main", "", "main"},
 		{"trunk", "", "trunk"},

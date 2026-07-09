@@ -8,15 +8,12 @@ import (
 	"strings"
 )
 
-// Pin holds the parsed components of a dependency pin key.
+// Pin holds the parsed components of a dependency pin key "OWNER/REPO@REF".
 //
-//	"OWNER/REPO@REF"
-//
-// The pin identifies a downloaded action tarball at repo+ref granularity —
-// matching the runner, which downloads `owner/repo@ref` once per ref and
-// reuses the tree for any sub-action path. Sub-action paths (e.g. the
-// `save` in `actions/cache/save@v4`) are graph traversal details, not pin
-// identity, and do not appear in this serialized form.
+// Pins identify an action at repo+ref granularity, matching the runner, which
+// downloads owner/repo@ref once and reuses the tree for any sub-action path.
+// Sub-action paths (e.g. the save in actions/cache/save@v4) are not part of
+// this serialized form.
 type Pin struct {
 	NWO   string // "actions/checkout"
 	Owner string // "actions"
@@ -24,13 +21,9 @@ type Pin struct {
 	Ref   string // "v4"
 }
 
-// Canonical returns a copy of p with all case-insensitive components
-// (owner, repo) normalized to lowercase. Ref preserves source casing —
-// git refs are case-sensitive.
-//
-// This is the single normalization point for the lockfile pin grammar:
-// String, IndexKey, and ParsePin all funnel through it, so callers never
-// need their own ToLower bookkeeping when handing pins through this package.
+// Canonical returns a copy of p with owner and repo lowercased. Ref preserves
+// source casing — git refs are case-sensitive. String, IndexKey, and ParsePin
+// all funnel through it.
 func (p Pin) Canonical() Pin {
 	p.Owner = strings.ToLower(p.Owner)
 	p.Repo = strings.ToLower(p.Repo)
@@ -57,19 +50,11 @@ func IndexKey(owner, repo, ref string) string {
 	return Pin{Owner: owner, Repo: repo, Ref: ref}.IndexKey()
 }
 
-// ParsePin parses a pin string of the canonical form:
-//
-//	"OWNER/REPO@REF"
-//
-// Returns ok=false for any input that does not match — including all of:
-//   - Missing "@" separator between repo and ref
-//   - A sub-action path in the repo portion (e.g. "owner/repo/sub@ref")
-//     — the lockfile grammar is strictly repo-scoped, matching the runner's
-//     tarball download identity
-//
-// On success, owner and repo are normalized to lowercase. Ref preserves
-// source casing — git refs are case-sensitive. The returned Pin is always
-// in canonical form.
+// ParsePin parses a canonical pin string "OWNER/REPO@REF". It returns
+// ok=false when the "@" separator is missing or the repo portion carries a
+// sub-action path (e.g. "owner/repo/sub@ref"), which the repo-scoped grammar
+// rejects. On success owner and repo are lowercased; Ref preserves source
+// casing.
 func ParsePin(s string) (Pin, bool) {
 	atIdx := strings.IndexByte(s, '@')
 	if atIdx <= 0 || atIdx == len(s)-1 {
@@ -78,10 +63,7 @@ func ParsePin(s string) (Pin, bool) {
 	repoPath := s[:atIdx]
 	ref := s[atIdx+1:]
 
-	// Sub-action paths are not part of the lockfile pin grammar: the runner
-	// downloads at repo+ref granularity. Reject any extra slashes in the
-	// repo portion so hand-edited lockfiles don't drift into a path-bearing
-	// format.
+	// Repo-scoped grammar: reject sub-action paths in the repo portion.
 	if strings.Count(repoPath, "/") != 1 {
 		return Pin{}, false
 	}
@@ -90,7 +72,6 @@ func ParsePin(s string) (Pin, bool) {
 		return Pin{}, false
 	}
 
-	// Reject empty refs and colons (colon is the legacy pin key separator).
 	if !isValidRef(ref) {
 		return Pin{}, false
 	}

@@ -48,7 +48,7 @@ func TestParseActionRef(t *testing.T) {
 		{name: "dot repo segment", input: "foo/.@v1", wantNil: true},
 		{name: "dot owner segment", input: "./repo@v1", wantNil: true},
 		// Refs are not validated beyond structural checks (colons for pin
-		// grammar). The workflow parser accepts any characters in refs.
+		// grammar).
 		{name: "ref with colon rejected", input: "a/b@v1:foo", wantNil: true},
 	}
 
@@ -89,9 +89,8 @@ func TestParseReusableWorkflowRef(t *testing.T) {
 		{name: "simple reusable yml", input: "octo/repo/.github/workflows/ci.yml@v1", wantNWO: "octo/repo", wantPath: ".github/workflows/ci.yml", wantRef: "v1"},
 		{name: "reusable yaml extension", input: "octo/repo/.github/workflows/ci.yaml@main", wantNWO: "octo/repo", wantPath: ".github/workflows/ci.yaml", wantRef: "main"},
 		{name: "reusable pinned to sha", input: "octo/repo/.github/workflows/ci.yml@11bd71901bbe5b1630ceea73d27597364c9af683", wantNWO: "octo/repo", wantPath: ".github/workflows/ci.yml", wantRef: "11bd71901bbe5b1630ceea73d27597364c9af683"},
-		// The bug this helper exists to prevent: a ref that itself contains
-		// `@`. A naive last-`@` split would mis-derive the path; the first-`@`
-		// split keeps the whole ref intact.
+		// The bug this guards against: a ref containing `@`. The first-`@`
+		// split keeps the whole ref intact where a naive last-`@` split fails.
 		{name: "ref containing at sign", input: "octo/repo/.github/workflows/ci.yml@release@2024", wantNWO: "octo/repo", wantPath: ".github/workflows/ci.yml", wantRef: "release@2024"},
 		{name: "ref containing slash", input: "octo/repo/.github/workflows/ci.yml@feature/foo", wantNWO: "octo/repo", wantPath: ".github/workflows/ci.yml", wantRef: "feature/foo"},
 		// Non-reusable shapes return nil.
@@ -156,7 +155,6 @@ func TestIsLocalReusableWorkflow(t *testing.T) {
 	}
 }
 
-
 func TestIsReusableWorkflow(t *testing.T) {
 	tests := []struct {
 		name string
@@ -179,8 +177,8 @@ func TestIsReusableWorkflow(t *testing.T) {
 	}
 }
 
-// TestActionAndReusableParsersAreMutuallyExclusive locks in the security
-// invariant: no single uses: string is accepted by both ParseActionRef and
+// TestActionAndReusableParsersAreMutuallyExclusive locks in the invariant that
+// no single uses: string is accepted by both ParseActionRef and
 // ParseReusableWorkflowRef.
 func TestActionAndReusableParsersAreMutuallyExclusive(t *testing.T) {
 	inputs := []string{

@@ -34,9 +34,8 @@ func TestParsePin(t *testing.T) {
 			},
 		},
 		{
-			// Monorepo sub-action tags (e.g. attest-build-provenance's
-			// predicate/) embed an '@' in the ref, producing a double-'@'
-			// key. The first '@' bounds the NWO and the rest is the ref.
+			// Monorepo sub-action tags can embed an '@' in the ref, producing
+			// a double-'@' key. The first '@' bounds the NWO; the rest is the ref.
 			name:  "ref containing at (monorepo sub-action tag)",
 			entry: "actions/attest-build-provenance@predicate@1.1.4",
 			want: Pin{

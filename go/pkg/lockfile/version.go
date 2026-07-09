@@ -8,30 +8,17 @@ import (
 
 // SemVer holds parsed semantic version components.
 //
-// API stability: the type and its comparison helpers (Greater, Narrows,
-// UpgradeOver, MajorTag, MinorTag, IsFull) are part of the exported surface
-// because the tag recommendation engine in downstream consumers relies on
-// them. Their semantics are deliberately non-strict-semver (see below) and are
-// committed to as-is; they are not internal helpers despite the
-// recommendation-engine flavor.
-//
-// GitHub Actions has no first-class version scheme — a uses: ref can be
-// any git ref (tag, branch, SHA, or even "main"). In practice most
-// action authors follow semver-ish conventions, but the ecosystem
-// diverges from strict semver in ways that golang.org/x/mod/semver
-// cannot handle: bare versions without a "v" prefix ("2.0.0"), partial
-// versions ("v4", "v4.2"), and arbitrary suffixes all appear in the
-// wild. x/mod/semver rejects bare and partial tags, and doesn't expose
-// individual components — we need Major/Minor/Patch to compute
-// MajorTag, MinorTag, and IsFull for the tag recommendation engine.
+// Its comparison helpers (Greater, Narrows, UpgradeOver, MajorTag, MinorTag,
+// IsFull) are deliberately non-strict-semver: they accept bare versions
+// ("2.0.0"), partial versions ("v4", "v4.2"), and arbitrary suffixes that
+// appear in Actions refs but that golang.org/x/mod/semver rejects.
 type SemVer struct {
 	Prefix string // "v" or "" — whether the original tag had a "v" prefix
 	Major  int
 	Minor  int
 	Patch  int
-	// Rest is everything after the patch number, e.g. "-beta.1" for
-	// "v1.2.3-beta.1". An empty Rest means the version is stable (no
-	// pre-release suffix). See [SemVer.IsStable].
+	// Rest is everything after the patch number (e.g. "-beta.1"). Empty
+	// means a stable version; see [SemVer.IsStable].
 	Rest string
 	Raw  string // original tag string as written (e.g. "v4" or "2.0.0-rc.1")
 }
@@ -108,18 +95,15 @@ func (s SemVer) IsStable() bool { return s.Rest == "" }
 
 // IsFull returns true if the version has all three components
 // (major.minor.patch) and no pre-release suffix. Tags like "v4" or "v4.2"
-// return false. IsFull is the prerequisite for a locked dependency: only a
-// full version uniquely identifies a release.
+// return false. Only a full version uniquely identifies a release.
 func (s SemVer) IsFull() bool {
 	return s.Rest == "" && s.Raw != s.MajorTag() && s.Raw != s.MinorTag()
 }
 
 // IsMutable reports whether the version is a partial (major-only or
-// major.minor) tag — the opposite of [SemVer.IsFull]. A partial tag like
-// "v4" or "v4.2" is "mutable" because the author can silently move it to
-// a new patch commit without changing the tag name, which makes it unsafe
-// to trust without a SHA pin. Use [SemVer.Narrows] to find a full patch
-// version that narrows a mutable tag.
+// major.minor) tag — the opposite of [SemVer.IsFull]. A partial tag can be
+// silently moved to a new patch commit, so it is unsafe to trust without a
+// SHA pin. Use [SemVer.Narrows] to find a full patch version that narrows it.
 func (s SemVer) IsMutable() bool { return !s.IsFull() }
 
 // IsMajorOnly reports whether the raw tag is a bare major version (e.g. "v4").

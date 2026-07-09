@@ -16,9 +16,8 @@ func TestParse_VersionRequired(t *testing.T) {
 }
 
 func TestParse_UnsupportedVersion(t *testing.T) {
-	// A version that isn't well-formed semver is rejected with the generic
-	// "unsupported" message — no upgrade-path hint, since we can't tell if
-	// the user is behind or just looking at garbage.
+	// A non-semver version is rejected with the generic "unsupported" message
+	// (no upgrade-path hint).
 	_, err := Parse([]byte("version: garbage\ndependencies: {}\n"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported dependency lockfile version")
@@ -32,10 +31,8 @@ func TestParse_FutureVersion_ReturnsFriendlyError(t *testing.T) {
 	assert.Contains(t, msg, "v0.0.999", "should name the lockfile version")
 	assert.Contains(t, msg, Version, "should name the supported version")
 	assert.Contains(t, msg, "upgrade", "should tell the user to upgrade")
-	// The library must stay tool-agnostic: ErrFutureVersion is consumed by
-	// external readers (Dependabot, actions-workflow-parser), so the message
-	// must not name a specific wrapping CLI. Consumers append their own
-	// upgrade instructions off errors.Is(err, ErrFutureVersion).
+	// ErrFutureVersion is consumed by external readers, so the library message
+	// must not name a specific wrapping CLI.
 	assert.NotContains(t, msg, "gh-actions-lock", "library message must not name a specific consumer tool")
 }
 
@@ -46,10 +43,9 @@ func TestParse_FutureVersion_IsErrFutureVersion(t *testing.T) {
 }
 
 func TestParse_WrongShapeReportsLine(t *testing.T) {
-	// A workflow value shaped as a mapping instead of the expected sequence of
-	// pin keys fails yaml type-decoding. Parse must surface the failing line as
-	// structured data (ParseError.Line) and strip yaml.v3's "yaml:" prefix from
-	// the reason so consumers don't misattribute the position to their own file.
+	// A workflow value shaped as a mapping instead of a pin-key sequence fails
+	// type-decoding; Parse must report the line and strip yaml.v3's "yaml:"
+	// prefix.
 	yaml := `version: v0.0.2
 dependencies: {}
 workflows:
@@ -67,8 +63,7 @@ workflows:
 }
 
 func TestParse_UnsupportedVersionReportsPosition(t *testing.T) {
-	// A semantic failure Parse detects itself must carry both line and column,
-	// resolved by walking the retained YAML node tree to the offending value.
+	// A semantic failure Parse detects itself must carry both line and column.
 	yaml := `version: v9
 dependencies: {}
 `
@@ -261,9 +256,8 @@ func mapKeys[V any](m map[string]V) []string {
 // ── Security hardening tests ──────────────────────────────────────────────────
 
 func TestParse_CommitEmptyStringRejected(t *testing.T) {
-	// commit:"" must be rejected: an empty commit SHA disables every downstream
-	// integrity check that reads Action.Commit, silently converting a
-	// required field into a no-op.
+	// An empty commit disables every downstream integrity check that reads
+	// Action.Commit, so it must be rejected.
 	yaml := `version: v0.0.2
 dependencies:
   actions/checkout@v4:
@@ -279,10 +273,8 @@ dependencies:
 }
 
 func TestParse_CommitInvalidFormatRejected(t *testing.T) {
-	// A non-empty commit that isn't a valid algo-hex digest must be rejected.
-	// "notadigest", "sha1-", and "HEAD" look plausible but carry no integrity
-	// guarantee; consumers checking the algo and hex individually would silently
-	// accept them, defeating the lockfile's purpose.
+	// A non-empty commit that isn't a valid algo-hex digest must be rejected:
+	// values like "notadigest", "sha1-", and "HEAD" carry no integrity guarantee.
 	cases := []struct {
 		name   string
 		commit string
@@ -325,9 +317,8 @@ func TestParse_CommitValidFormatsAccepted(t *testing.T) {
 }
 
 func TestParse_WorkflowPathTraversalRejected(t *testing.T) {
-	// Workflow map keys are consumed as file paths by callers — accepting
-	// "../../../etc/passwd" or "/etc/shadow" as a key is an arbitrary read
-	// primitive for any consumer that calls os.Open(key).
+	// Workflow map keys are consumed as file paths, so traversal keys like
+	// "../../../etc/passwd" or "/etc/shadow" must be rejected.
 	cases := []struct {
 		name string
 		key  string
@@ -366,9 +357,8 @@ func TestParse_WorkflowPathLegitimateKeysAccepted(t *testing.T) {
 }
 
 func TestParse_OversizedInputRejected(t *testing.T) {
-	// An input larger than MaxParseSize must be rejected before any YAML
-	// parsing so that memory-exhaustion DoS from oversized documents is
-	// prevented at the library boundary.
+	// Inputs larger than MaxParseSize must be rejected before any YAML parsing
+	// to prevent memory-exhaustion DoS.
 	oversized := make([]byte, MaxParseSize+1)
 	for i := range oversized {
 		oversized[i] = 'x'
@@ -451,9 +441,8 @@ dependencies:
 }
 
 func TestParse_KeyBodyRefMismatchRejected(t *testing.T) {
-	// The pin key says "@v4" but the body says ref: v3 — this must be
-	// rejected because the mismatch means the lockfile was hand-edited
-	// inconsistently and cannot be trusted.
+	// A pin key "@v4" with body ref: v3 is an inconsistent hand-edit and must
+	// be rejected.
 	yaml := `version: v0.0.2
 dependencies:
   actions/checkout@v4:

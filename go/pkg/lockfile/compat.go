@@ -67,7 +67,6 @@ func parseInternal(contents []byte, policy *VersionPolicy, paths []string) (File
 		return File{}, pe
 	}
 
-	// Apply version policy.
 	p := DefaultPolicy()
 	if policy != nil {
 		p = *policy
@@ -76,7 +75,6 @@ func parseInternal(contents []byte, policy *VersionPolicy, paths []string) (File
 		return File{}, err
 	}
 
-	// Version-aware validation and canonicalization.
 	if pe := validateKnownFieldsVersioned(&f, paths, f.Version); pe != nil {
 		return File{}, pe
 	}
@@ -126,8 +124,8 @@ func parseInternal(contents []byte, policy *VersionPolicy, paths []string) (File
 		return File{}, pe
 	}
 
-	// Normalize the version to the latest — the File struct always represents
-	// the current schema regardless of what was on disk.
+	// Normalize to the latest version: File always represents the current
+	// schema regardless of what was on disk.
 	f.Version = Version
 
 	return f, nil
@@ -198,8 +196,6 @@ func isKnownVersion(v string) bool {
 }
 
 // versionLessThan reports whether a < b using semver comparison.
-// Reuses the existing parseSchemaVersion + isFutureVersion helpers from
-// lockfile.go rather than reimplementing the comparison.
 func versionLessThan(a, b string) bool {
 	return isFutureVersion(b, a)
 }
@@ -269,7 +265,6 @@ func migrateV001Actions(f *File) {
 			}
 		}
 
-		// Update the Action in the File struct.
 		key := pinKey.Value
 		if a, ok := f.Dependencies[key]; ok {
 			if a.Ref == "" {
@@ -310,7 +305,6 @@ func parsePinV001(s string) (Pin, bool) {
 		}
 	}
 
-	// Validate the ref with the same check as ParsePin — reject empty refs.
 	if !isValidRef(ref) {
 		return Pin{}, false
 	}
@@ -398,8 +392,8 @@ func canonicalizeWorkflowDepsV001(f *File) (string, string, error) {
 	return "", "", nil
 }
 
-// validateKnownFieldsVersioned is the version-aware variant of validateKnownFields.
-// It selects the correct allowed/required key sets based on the lockfile version.
+// validateKnownFieldsVersioned is the version-aware variant of
+// validateKnownFields, selecting the allowed/required key sets per version.
 func validateKnownFieldsVersioned(f *File, paths []string, version string) *ParseError {
 	allowed := allowedActionKeys
 	required := requiredActionKeys
@@ -471,8 +465,7 @@ func validateKnownFieldsVersioned(f *File, paths []string, version string) *Pars
 		if pe := rejectZeroValues(action, pinKey.Value); pe != nil {
 			return pe
 		}
-		// Key-ref mismatch and full-SHA checks only apply for v0.0.2+
-		// where the pin key format is owner/repo@ref.
+		// These checks only apply for v0.0.2+ (owner/repo@ref pin keys).
 		if version != "v0.0.1" {
 			if pe := rejectKeyRefMismatch(pinKey, action); pe != nil {
 				return pe

@@ -32,10 +32,8 @@ func TestSchema_EmbeddedMatchesRootInvariant(t *testing.T) {
 }
 
 // TestSchema_EmbeddedMatchesEnforcement guards against drift between the
-// published JSON Schema and the keys Parse actually enforces. The schema file
-// is the contract; validateKnownFields is the engine. If they disagree, the
-// lockfile would either silently accept fields the schema forbids or reject
-// fields it permits.
+// published JSON Schema (the contract) and the keys Parse enforces (the
+// engine).
 func TestSchema_EmbeddedMatchesEnforcement(t *testing.T) {
 	var doc struct {
 		Properties map[string]struct {
@@ -221,10 +219,9 @@ dependencies:
 	assert.Contains(t, f.Workflows, ".github/workflows/ci.yml")
 }
 
-// corruptLockfile is a shared fixture for scoped-validation tests.
-// It has two deps: goodPin is valid, corruptPin is missing the required
-// "commit" field. Workflow A references only the good dep, workflow B
-// references only the corrupt dep.
+// corruptLockfile is a shared fixture for scoped-validation tests: goodPin is
+// valid, corruptPin is missing the required "commit" field. Workflow A
+// references only goodPin, workflow B only corruptPin.
 const (
 	goodPin    = "actions/checkout@v4"
 	corruptPin = "actions/setup-go@v5"

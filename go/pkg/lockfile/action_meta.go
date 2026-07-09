@@ -31,13 +31,11 @@ type ActionMeta struct {
 const MaxActionMetaSize = 1 << 20 // 1 MiB
 
 // ParseActionMeta parses the contents of an action.yml or action.yaml file
-// into an [ActionMeta]. Pass the raw file bytes as a string; the file name
-// itself is not needed. Composite actions emit their nested step `uses:`
-// strings in NestedUses; non-composite actions return an empty NestedUses.
+// into an [ActionMeta]. Composite actions emit their nested step `uses:`
+// strings in NestedUses; other actions return an empty NestedUses.
 //
-// Returns an error only on malformed YAML. Unknown `runs.using` values
-// (e.g. a future executor type) resolve to [ExecUnknown] rather than
-// failing, so callers can handle them gracefully.
+// It returns an error only on malformed YAML. Unknown runs.using values
+// resolve to [ExecUnknown] rather than failing.
 func ParseActionMeta(content string) (*ActionMeta, error) {
 	if len(content) > MaxActionMetaSize {
 		return nil, fmt.Errorf("action metadata too large: %d bytes (max %d)", len(content), MaxActionMetaSize)
@@ -89,9 +87,9 @@ func ParseActionMeta(content string) (*ActionMeta, error) {
 	return meta, nil
 }
 
-// rejectYAMLAnchors walks a yaml.Node tree and returns an error if any anchor
-// definition or alias reference is found. action.yml does not use YAML anchors,
-// so their presence is either a mistake or an attempted exploit.
+// rejectYAMLAnchors returns an error if the node tree contains any anchor
+// definition or alias. action.yml does not use anchors, so their presence is a
+// mistake or an attempted exploit.
 func rejectYAMLAnchors(n *yaml.Node) error {
 	if n == nil {
 		return nil
