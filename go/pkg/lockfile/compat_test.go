@@ -237,3 +237,45 @@ func TestDefaultPolicy(t *testing.T) {
 	assert.Equal(t, "v0.0.1", p.Min)
 	assert.Equal(t, Version, p.Max)
 }
+
+func TestParse_DuplicateDependencyKey_ConflictingSHAs(t *testing.T) {
+	// Two identical dependency keys with conflicting commit SHAs must be
+	// rejected with a domain-specific, positioned parse error rather than
+	// yaml.v3's generic "mapping key already defined" message.
+	input := `version: 'v0.0.2'
+workflows:
+    '.github/workflows/scenario-duplicate-deps-conflicting-failure.yml':
+        - 'nodeselector/actions-test-fixtures@dup-test'
+dependencies:
+    'nodeselector/actions-test-fixtures@dup-test':
+        ref: 'dup-test'
+        commit: 'sha1-33a384c001ed694ba938667a1d5ace65d6c49de3'
+        owner_id: 29457092
+        repo_id: 1203329948
+    'nodeselector/actions-test-fixtures@dup-test':
+        ref: 'dup-test'
+        commit: 'sha1-0000000000000000000000000000000000000000'
+        owner_id: 29457092
+        repo_id: 1203329948
+`
+	for _, tc := range []struct {
+		name  string
+		parse func() (File, error)
+	}{
+		{"Parse", func() (File, error) { return Parse([]byte(input)) }},
+		{"ParseWithPolicy", func() (File, error) { return ParseWithPolicy([]byte(input), DefaultPolicy()) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := tc.parse()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "duplicate dependency key")
+			assert.Contains(t, err.Error(), "nodeselector/actions-test-fixtures@dup-test")
+
+			// Must be the domain path (positioned *ParseError), not a bare
+			// yaml.v3 error — this is what surfaces as a dispatch-time 422.
+			var pe *ParseError
+			require.ErrorAs(t, err, &pe)
+			assert.NotZero(t, pe.Line, "duplicate key error must carry a line position")
+		})
+	}
+}
