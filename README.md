@@ -2,14 +2,14 @@
 
 > [!NOTE]
 > **Public preview.** This project is pre-1.0 and under active development. The
-> lockfile schema (currently `v0.0.2`) and the Go module's exported surface may
-> change before a `v1.0.0` release. Pin to an exact version and expect breaking
-> changes between minor versions until then.
+> lockfile schema (currently `v0.0.2`) and the language packages' exported
+> surfaces may change before a `v1.0.0` release. Pin to an exact version and
+> expect breaking changes between minor versions until then.
 
 The authoritative definition of the GitHub Actions dependency lockfile
-format, plus a Go parser for it. The lockfile records the resolved transitive
-dependency graph for a repository's workflows so tools can audit and verify the
-exact action pins in use.
+format, plus Go and Ruby parsers for it. The lockfile records the resolved
+transitive dependency graph for a repository's workflows so tools can audit
+and verify the exact action pins in use.
 
 ## Background
 
@@ -22,12 +22,20 @@ Contributions are welcome — see [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## Installation
 
+### Go
+
 ```sh
 go get github.com/github/actions-lockfile/go/pkg/lockfile
 ```
 
-The Go module lives under [`go/`](./go/) so the repository can grow
-additional language bindings around the same lockfile schema.
+### Ruby
+
+```sh
+gem install actions-lockfile
+```
+
+The language packages live under [`go/`](./go/) and [`ruby/`](./ruby/) and
+share the root lockfile schema and test data.
 
 ## Usage
 
@@ -84,6 +92,29 @@ if err != nil {
 _ = file
 ```
 
+### Ruby
+
+```ruby
+require "actions/lockfile"
+
+Lockfile = GitHub::Actions::Lockfile
+contents = File.binread(Lockfile::PATH)
+file = Lockfile.parse(
+  contents,
+  policy: Lockfile::VersionPolicy.exact("v0.0.2")
+)
+
+pins = file.lookup_workflow(".github/workflows/release.yml")
+action = file.lookup_pin("actions", "checkout", "v4.3.1")
+file.validate_dependency!(pins.first)
+puts action.commit
+```
+
+The Ruby parser uses `Psych.safe_load`, wraps YAML failures in
+`GitHub::Actions::Lockfile::ParseError`, and currently accepts only schema
+`v0.0.2`. Its default policy is already exact; pass an explicit
+`VersionPolicy` when the consumer owns the compatibility boundary.
+
 ## Schema
 
 The lockfile is a YAML document whose shape is defined by a JSON Schema 2020-12
@@ -121,12 +152,13 @@ accepted.
 
 ## Compatibility and stability
 
-- The Go module follows [semver](https://semver.org/). The publicly documented
-  exported surface is intended to be stable across minor versions.
+- The Go module and Ruby gem follow [semver](https://semver.org/) independently.
+  Releases use `go/vX.Y.Z` and `ruby/vX.Y.Z` tags respectively.
 - The lockfile schema is versioned independently. The current schema version
-  is `v0.0.2`, embedded in the package and emitted as the `version` field of
-  every lockfile. The parser reads both v0.0.1 and v0.0.2.
-- Pre-1.0, the package reserves the right to remove any incidentally-exported
+  is `v0.0.2` and is emitted as the `version` field of every lockfile. The Go
+  parser reads v0.0.1 and v0.0.2; the Ruby parser intentionally accepts exactly
+  v0.0.2.
+- Pre-1.0, the packages reserve the right to remove any incidentally-exported
   helper not covered by the [Usage](#usage) and
   [What this package does](#what-this-package-does) sections. Those sections
   define the intended stable surface.

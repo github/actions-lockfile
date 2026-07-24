@@ -1,0 +1,21 @@
+# frozen_string_literal: true
+
+require "rake/testtask"
+require "rubygems/package_task"
+
+gemspec = Gem::Specification.load("actions-lockfile.gemspec")
+Gem::PackageTask.new(gemspec)
+
+Rake::TestTask.new(:test) do |task|
+  task.libs << "lib" << "test"
+  task.pattern = "test/**/*_test.rb"
+end
+
+desc "Check Ruby syntax"
+task :syntax do
+  Dir["lib/**/*.rb", "test/**/*.rb", "Rakefile"].each do |file|
+    ruby "-c", file
+  end
+end
+
+task default: %i[test syntax]

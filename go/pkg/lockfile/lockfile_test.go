@@ -2,12 +2,26 @@ package lockfile
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestParse_SharedV002Fixture(t *testing.T) {
+	contents, err := os.ReadFile("../../../testdata/actions-lock-v0.0.2.yml")
+	if errors.Is(err, os.ErrNotExist) {
+		t.Skip("shared fixture is not present in this module checkout")
+	}
+	require.NoError(t, err)
+
+	f, err := Parse(contents)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"actions/checkout@v4.3.1"}, f.Workflows[".github/workflows/ci.yml"])
+	assert.Equal(t, "v4.3.1", f.Dependencies["actions/checkout@v4.3.1"].Ref)
+}
 
 func TestParse_VersionRequired(t *testing.T) {
 	_, err := Parse([]byte(`dependencies: {}` + "\n"))

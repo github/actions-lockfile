@@ -33,7 +33,28 @@ jobs:
         run: git diff --exit-code go/pkg/lockfile/schema_gen.go
 
       - name: Lint
-        run: make lint
+        run: make lint-go
 
       - name: Test
-        run: make test
+        run: make test-go
+
+  ruby:
+    name: Ruby
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        ruby-version: ['3.1', '3.3']
+    steps:
+      - uses: actions/checkout@v4.3.1
+
+      - uses: ruby/setup-ruby@v1.321.0
+        with:
+          ruby-version: ${{ matrix.ruby-version }}
+          bundler-cache: true
+          working-directory: ruby
+
+      - name: Syntax
+        run: make lint-ruby
+
+      - name: Test
+        run: make test-ruby

@@ -14,3 +14,10 @@ runner/
 
 # Test artifacts
 *.bak
+
+# Ruby build output
+/.bundle/
+/ruby/*.gem
+/ruby/.bundle/
+/ruby/pkg/
+/ruby/vendor/bundle/

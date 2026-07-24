@@ -1,0 +1,49 @@
+# This workflow is managed by gh actions-lock.
+
+name: Release Ruby gem
+
+on:
+  push:
+    tags:
+      - ruby/v*
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Push actions-lockfile
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4.3.1
+        with:
+          persist-credentials: false
+
+      - uses: ruby/setup-ruby@v1.321.0
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+          working-directory: ruby
+
+      - name: Verify tag
+        working-directory: ruby
+        run: |
+          version="$(ruby -Ilib -ractions/lockfile/version -e 'print GitHub::Actions::Lockfile::VERSION')"
+          test "$GITHUB_REF_NAME" = "ruby/v$version"
+
+      - name: Test
+        run: make test-ruby
+
+      - uses: rubygems/configure-rubygems-credentials@v2.1.0
+
+      - name: Build and push
+        working-directory: ruby
+        run: |
+          version="$(ruby -Ilib -ractions/lockfile/version -e 'print GitHub::Actions::Lockfile::VERSION')"
+          gem_file="actions-lockfile-$version.gem"
+          gem build actions-lockfile.gemspec --output "$gem_file"
+          gem push "$gem_file"
