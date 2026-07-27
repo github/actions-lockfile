@@ -53,6 +53,12 @@ func parseInternal(contents []byte, policy *VersionPolicy, paths []string) (File
 	if err := yaml.Unmarshal(contents, &root); err != nil {
 		return File{}, newYAMLParseError(err)
 	}
+	// yaml.v3's Decode rejects duplicate mapping keys, but with a generic
+	// message. Detect duplicate dependency keys first so we can return a
+	// domain-specific, positioned error before the generic decode error fires.
+	if pe := rejectDuplicateDependencyKeys(&root); pe != nil {
+		return File{}, pe
+	}
 	var f File
 	if err := root.Decode(&f); err != nil {
 		return File{}, newYAMLParseError(err)
@@ -474,6 +480,41 @@ func validateKnownFieldsVersioned(f *File, paths []string, version string) *Pars
 				return pe
 			}
 		}
+	}
+	return nil
+}
+
+// rejectDuplicateDependencyKeys walks the top-level `dependencies` mapping and
+// returns a positioned ParseError on the first duplicate key. yaml.v3's Decode
+// would reject duplicates too, but with a generic message; this yields a
+// domain-specific one. Defensive: any unexpected node shape returns nil and
+// lets the normal decode path handle it.
+func rejectDuplicateDependencyKeys(root *yaml.Node) *ParseError {
+	m := docMapping(root)
+	if m == nil {
+		return nil
+	}
+	_, deps := mappingEntry(m, "dependencies")
+	if deps == nil || deps.Kind != yaml.MappingNode {
+		return nil
+	}
+	seen := make(map[string]int, len(deps.Content)/2)
+	for i := 0; i+1 < len(deps.Content); i += 2 {
+		k := deps.Content[i]
+		// Only compare real string scalar keys. Aliases or non-scalar keys can
+		// share a Value (e.g. empty), so skip them and let Decode surface the
+		// normal shape error rather than a misleading duplicate.
+		if k.Kind != yaml.ScalarNode || k.Tag != "!!str" {
+			continue
+		}
+		if first, dup := seen[k.Value]; dup {
+			return &ParseError{
+				Line:   k.Line,
+				Column: k.Column,
+				Msg:    fmt.Sprintf("duplicate dependency key %q in lockfile dependencies (first defined at line %d)", k.Value, first),
+			}
+		}
+		seen[k.Value] = k.Line
 	}
 	return nil
 }
