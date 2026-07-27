@@ -501,6 +501,12 @@ func rejectDuplicateDependencyKeys(root *yaml.Node) *ParseError {
 	seen := make(map[string]int, len(deps.Content)/2)
 	for i := 0; i+1 < len(deps.Content); i += 2 {
 		k := deps.Content[i]
+		// Only compare real string scalar keys. Aliases or non-scalar keys can
+		// share a Value (e.g. empty), so skip them and let Decode surface the
+		// normal shape error rather than a misleading duplicate.
+		if k.Kind != yaml.ScalarNode || k.Tag != "!!str" {
+			continue
+		}
 		if first, dup := seen[k.Value]; dup {
 			return &ParseError{
 				Line:   k.Line,
