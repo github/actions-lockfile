@@ -43,8 +43,8 @@ The script validates the repository, checks the current branch and
 The tag workflow verifies the tag, then creates the GitHub Release and warms
 the Go module proxy.
 
-A pushed release tag is immutable. If publishing fails, fix the publisher and
-run the release script again for the next RC; do not move or reuse the failed tag.
+Release tags are immutable. If publishing fails, fix the publisher and run
+the release script again for the next RC.
 
 ## Tag conventions
 
