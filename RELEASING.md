@@ -19,9 +19,20 @@ Then cut it:
 script/release patch
 ```
 
-Append `--rc` to preview or cut a release candidate, for example
-`script/release patch --rc`. Repeating the same bump increments `-rc.N`; omit
-`--rc` to release the stable version.
+To preview a release candidate instead:
+
+```sh
+RELEASE_DRY_RUN=1 script/release patch --rc
+```
+
+Then cut it:
+
+```sh
+script/release patch --rc
+```
+
+The first candidate is `go/vX.Y.Z-rc.1`; repeating the same bump increments
+`rc.N`. Run the bump without `--rc` to publish the stable `go/vX.Y.Z`.
 
 Use `patch` for compatible fixes, `minor` for compatible additions, and
 `major` for breaking changes.
@@ -31,6 +42,9 @@ The script validates the repository, checks the current branch and
 
 The tag workflow verifies the tag, then creates the GitHub Release and warms
 the Go module proxy.
+
+A pushed release tag is immutable. If publishing fails, fix the publisher and
+run the release script again for the next RC; do not move or reuse the failed tag.
 
 ## Tag conventions
 
