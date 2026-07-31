@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# shellcheck source=script/release
+source "$(dirname "$0")/release"
+
+check() {
+  local expected="$1"
+  local bump="$2"
+  local prerelease="$3"
+  shift 3
+
+  local actual
+  actual="$(printf '%s\n' "$@" | select_tag "$bump" "$prerelease")"
+  [ "$actual" = "$expected" ] || {
+    echo "expected $expected, got $actual" >&2
+    exit 1
+  }
+}
+
+check go/v0.0.5 patch 0 go/v0.0.4
+check go/v0.0.5-rc.1 patch 1 go/v0.0.4
+check go/v0.0.5-rc.3 patch 1 go/v0.0.5-rc.2 go/v0.0.5-rc.1 go/v0.0.4
+check go/v0.0.5 patch 0 go/v0.0.5-rc.2 go/v0.0.4
+check go/v0.1.0-rc.1 minor 1 go/v0.0.5-rc.2 go/v0.0.4
+
+if [ "${1:-}" = "--current" ]; then
+  [ "$#" -eq 3 ] || {
+    echo "usage: script/release_test --current <expected-tag> <bump>" >&2
+    exit 1
+  }
+  actual="$(git tag --list "${TAG_PREFIX}*" --sort=-v:refname | select_tag "$3" 1)"
+  [ "$actual" = "$2" ] || {
+    echo "expected current tags to select $2, got $actual" >&2
+    exit 1
+  }
+  echo "current tags select $actual"
+fi
+
+echo "release tag selection passed"

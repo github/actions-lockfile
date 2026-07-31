@@ -7,25 +7,30 @@ standalone module so consumers can import it on its own.
 
 ## Cutting a release
 
-Releases are cut by CI, not from a maintainer's laptop. Open the **Actions**
-tab, run the **Release** workflow from `main`, and choose a bump:
-
-- **patch** — backward-compatible fixes
-- **minor** — backward-compatible additions
-- **major** — breaking changes (see the version-suffix caveat below)
-
-CI runs `script/release`, which regenerates and verifies the tree, runs the
-full build, computes the next version from the latest `go/vX.Y.Z` tag, pushes
-the tag, cuts a GitHub Release with generated notes, and warms the Go module
-proxy. The first release has no prior tag, so it bases off `v0.0.0` — pick
-**minor** to land on `v0.1.0`.
-
-`script/release` is the single source of truth and runs locally too. Preview
-without touching anything:
+From a clean, current `main`, preview the next release:
 
 ```sh
-RELEASE_DRY_RUN=1 script/release minor
+RELEASE_DRY_RUN=1 script/release patch
 ```
+
+Then cut it:
+
+```sh
+script/release patch
+```
+
+Append `--rc` to preview or cut a release candidate, for example
+`script/release patch --rc`. Repeating the same bump increments `-rc.N`; omit
+`--rc` to release the stable version.
+
+Use `patch` for compatible fixes, `minor` for compatible additions, and
+`major` for breaking changes.
+
+The script validates the repository, checks the current branch and
+`origin/main`, then pushes and verifies an annotated `go/vX.Y.Z[-rc.N]` tag.
+
+The tag workflow verifies the tag, then creates the GitHub Release and warms
+the Go module proxy.
 
 ## Tag conventions
 
@@ -34,6 +39,7 @@ repository rules:
 
 ```
 go/v0.1.0
+go/v0.1.1-rc.1
 go/v0.1.1
 go/v1.0.0
 ```
@@ -51,7 +57,7 @@ release script refuses to mint such a tag until `go.mod` carries the suffix.
 
 Shared lockfile invariants live outside language implementations:
 
-- `schema/lockfile-v0.0.1.json` is the published schema.
+- `schema/lockfile-vX.Y.Z.json` files are the published schemas.
 - `go/pkg/lockfile/schema_gen.go` is generated from the root schema for Go
   consumers. Run `make generate` after schema changes; Go tests enforce that
   the generated value still matches the root schema.

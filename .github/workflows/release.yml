@@ -3,47 +3,55 @@
 name: Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      bump:
-        description: Version bump for the Go module (go/vX.Y.Z tag)
-        type: choice
-        required: true
-        default: patch
-        options:
-          - patch
-          - minor
-          - major
+  push:
+    tags:
+      - go/v*
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: release
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  release:
-    name: Cut go/ release
+  publish:
+    name: Publish
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     steps:
-      - name: Guard release branch
-        if: github.ref != 'refs/heads/main'
-        run: |
-          echo "::error::Releases must be cut from main (got $GITHUB_REF)."
-          exit 1
-
       - uses: actions/checkout@v4.3.1
         with:
           fetch-depth: 0
           fetch-tags: true
 
-      - uses: actions/setup-go@v5.6.0
-        with:
-          go-version: '1.19'
-          cache-dependency-path: go/go.sum
+      - name: Verify tag
+        id: tag
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^go/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.[1-9][0-9]*)?$ ]]; then
+            echo "::error::Invalid release tag '$GITHUB_REF_NAME'; expected go/vX.Y.Z or go/vX.Y.Z-rc.N."
+            exit 1
+          fi
+          commit="$(git rev-list -n 1 "$GITHUB_REF_NAME")"
+          remote_commit="$(git ls-remote --tags origin "refs/tags/${GITHUB_REF_NAME}^{}" | awk 'NR == 1 { print $1 }')"
+          if [ "$(git cat-file -t "refs/tags/$GITHUB_REF_NAME")" != "tag" ] || [ "$remote_commit" != "$commit" ]; then
+            echo "::error::Release tag '$GITHUB_REF_NAME' is not an annotated remote tag."
+            exit 1
+          fi
+          echo "version=${GITHUB_REF_NAME#go/}" >>"$GITHUB_OUTPUT"
 
-      - name: Release
+      - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: script/release "${{ inputs.bump }}"
+        run: |
+          args=()
+          if [[ "$GITHUB_REF_NAME" == *-rc.* ]]; then
+            args+=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --verify-tag --generate-notes "${args[@]}"
+
+      - name: Warm Go proxy
+        run: |
+          curl -fsSL "https://proxy.golang.org/github.com/github/actions-lockfile/go/@v/${{ steps.tag.outputs.version }}.info" >/dev/null ||
+            echo "::warning::Go proxy warm failed; the proxy will fetch on first use."
