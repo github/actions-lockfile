@@ -1,120 +1,199 @@
 #!/usr/bin/env bash
 #
-# Cut a release of the Go sub-module by creating a path-prefixed tag
-# (go/vX.Y.Z) and a matching GitHub Release.
+# Cut a release tag for the Go sub-module.
 #
 # Usage:
-#   script/release <patch|minor|major>
+#   script/release <patch|minor|major> [--rc]
 #
 # The next version is computed from the latest go/vX.Y.Z tag and the chosen
-# bump. This script is the single source of truth for the release procedure:
-# CI invokes it from .github/workflows/release.yml, and a maintainer can run
-# it locally (set RELEASE_DRY_RUN=1 to preview without tagging or pushing).
+# bump. Maintainers run this locally to validate and push an annotated tag.
+# The tag workflow publishes it.
 #
 # Environment:
 #   RELEASE_DRY_RUN=1   Compute and print the next version, then stop before
-#                       mutating anything (no tag, no push, no release).
+#                       tagging or pushing.
 #
-# Requires: git, go, make, gh (authenticated, for the non-dry-run path).
+# Requires: git, go, make.
 
 set -euo pipefail
 
 MODULE_PATH="github.com/github/actions-lockfile/go"
 TAG_PREFIX="go/v"
+STABLE_TAG_RE='^go/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+TAG_RE='^go/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.[1-9][0-9]*)?$'
 
 die() {
   echo "error: $*" >&2
   exit 1
 }
 
-bump="${1:-}"
-case "$bump" in
-  patch | minor | major) ;;
-  *) die "usage: script/release <patch|minor|major>" ;;
-esac
+validate_tag() {
+  [[ "$1" =~ $TAG_RE ]] ||
+    die "invalid release tag '$1'; expected go/vX.Y.Z or go/vX.Y.Z-rc.N"
+}
 
-# Run from the repository root regardless of the caller's cwd.
-cd "$(dirname "$0")/.."
+fetch_main() {
+  git fetch --quiet --tags origin refs/heads/main:refs/remotes/origin/main
+}
 
-# 1. The release commit must already contain generated output. Regenerate and
-#    fail if anything under go/ drifts — we tag HEAD, not the working tree, so
-#    a dirty tree means the tag would ship stale generated code.
-make generate
-if [ -n "$(git status --porcelain -- go/)" ]; then
-  echo "go/ tree is dirty after 'make generate':" >&2
-  git --no-pager status --porcelain -- go/ >&2
-  die "commit regenerated output before releasing"
-fi
+require_current_main() {
+  local commit="$1"
+  local main
+  fetch_main
+  main="$(git rev-parse refs/remotes/origin/main)"
+  [ "$commit" = "$main" ] ||
+    die "release commit ${commit} is not current main ${main}"
+}
 
-# 2. Gate on a green build at the exact commit being tagged.
-make lint
-make test
-
-# 3. Confirm the module path matches what consumers import.
-actual_module="$(cd go && go list -m)"
-[ "$actual_module" = "$MODULE_PATH" ] ||
-  die "module path is '$actual_module', expected '$MODULE_PATH'"
-
-# 4. Find the latest plain release tag (ignore prereleases like go/v1.2.0-rc.1).
-latest=""
-while IFS= read -r t; do
-  [ -n "$t" ] || continue
-  if printf '%s' "${t#"$TAG_PREFIX"}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-    latest="$t"
-    break
+require_clean() {
+  if [ -n "$(git status --porcelain)" ]; then
+    git --no-pager status --short >&2
+    die "working tree is not clean"
   fi
-done < <(git tag --list "${TAG_PREFIX}*" --sort=-v:refname)
+}
 
-if [ -z "$latest" ]; then
-  base="0.0.0"
-  echo "No existing ${TAG_PREFIX}* release tag; basing bump on v0.0.0."
-else
-  base="${latest#"$TAG_PREFIX"}"
+require_remote_annotated_tag() {
+  local tag="$1"
+  local commit="$2"
+  local remote_commit
+  remote_commit="$(git ls-remote --tags origin "refs/tags/${tag}^{}" | awk 'NR == 1 { print $1 }')"
+  [ "$remote_commit" = "$commit" ] ||
+    die "remote tag ${tag} is missing, is not annotated, or does not point to ${commit}"
+}
+
+guard_major_version() {
+  local major="$1"
+  if [ "$major" -ge 2 ] && [[ "$MODULE_PATH" != */v"$major" ]]; then
+    die "v${major}.x requires the module path to end in /v${major} (it is '$MODULE_PATH'); update go.mod and this script before release"
+  fi
+}
+
+select_tag() {
+  local bump="$1"
+  local prerelease="$2"
+  local latest="" t
+  local tags=()
+
+  while IFS= read -r t; do
+    [ -n "$t" ] || continue
+    tags+=("$t")
+    if [ -z "$latest" ] && [[ "$t" =~ $STABLE_TAG_RE ]]; then
+      latest="$t"
+    fi
+  done
+
+  local base
+  if [ -z "$latest" ]; then
+    base="0.0.0"
+  else
+    base="${latest#"$TAG_PREFIX"}"
+  fi
+
+  local major rest minor patch stable_tag
+  major="${base%%.*}"
+  rest="${base#*.}"
+  minor="${rest%%.*}"
+  patch="${rest#*.}"
+  case "$bump" in
+    major) major=$((major + 1)); minor=0; patch=0 ;;
+    minor) minor=$((minor + 1)); patch=0 ;;
+    patch) patch=$((patch + 1)) ;;
+  esac
+  stable_tag="${TAG_PREFIX}${major}.${minor}.${patch}"
+
+  if [ "$prerelease" = "0" ]; then
+    printf '%s\n' "$stable_tag"
+    return
+  fi
+
+  local highest=0 n
+  for t in "${tags[@]}"; do
+    case "$t" in
+      "$stable_tag"-rc.*)
+        n="${t#"$stable_tag-rc."}"
+        if [[ "$n" =~ ^[1-9][0-9]*$ ]] && [ "$n" -gt "$highest" ]; then
+          highest="$n"
+        fi
+        ;;
+    esac
+  done
+  printf '%s-rc.%d\n' "$stable_tag" "$((highest + 1))"
+}
+
+cut_tag() {
+  local bump="$1"
+  local prerelease="$2"
+
+  local branch
+  branch="$(git symbolic-ref --quiet --short HEAD || true)"
+  [ "$branch" = "main" ] || die "releases must be cut from main (got ${branch:-detached HEAD})"
+  require_clean
+  require_current_main "$(git rev-parse HEAD)"
+
+  # The tag must contain generated output and pass the full repository checks.
+  make generate
+  if [ -n "$(git status --porcelain -- go/)" ]; then
+    echo "go/ tree is dirty after 'make generate':" >&2
+    git --no-pager status --porcelain -- go/ >&2
+    die "commit regenerated output before releasing"
+  fi
+  make lint
+  make test
+
+  local actual_module
+  actual_module="$(cd go && go list -m)"
+  [ "$actual_module" = "$MODULE_PATH" ] ||
+    die "module path is '$actual_module', expected '$MODULE_PATH'"
+
+  local tag version major
+  tag="$(git tag --list "${TAG_PREFIX}*" --sort=-v:refname | select_tag "$bump" "$prerelease")"
+  version="${tag#go/}"
+  major="${version#v}"
+  major="${major%%.*}"
+  guard_major_version "$major"
+
+  validate_tag "$tag"
+  git rev-parse -q --verify "refs/tags/${tag}" >/dev/null &&
+    die "tag ${tag} already exists"
+
+  echo "Cutting ${tag} (module version ${version}) at $(git rev-parse --short HEAD)"
+  if [ "${RELEASE_DRY_RUN:-}" = "1" ]; then
+    echo "RELEASE_DRY_RUN=1 set; stopping before tag and push."
+    return
+  fi
+
+  git tag -a "$tag" -m "$tag"
+  local commit
+  commit="$(git rev-parse "${tag}^{commit}")"
+  require_current_main "$commit"
+  git push origin "refs/tags/${tag}"
+  require_remote_annotated_tag "$tag" "$commit"
+  echo "Pushed ${tag}; the tag workflow will create the release."
+}
+
+main() {
+  cd "$(dirname "$0")/.."
+
+  local bump="${1:-}"
+  case "$bump" in
+    patch | minor | major) ;;
+    *) die "usage: script/release <patch|minor|major> [--rc]" ;;
+  esac
+
+  local prerelease=0
+  case "$#" in
+    1) ;;
+    2)
+      [ "$2" = "--rc" ] ||
+        die "usage: script/release <patch|minor|major> [--rc]"
+      prerelease=1
+      ;;
+    *) die "usage: script/release <patch|minor|major> [--rc]" ;;
+  esac
+
+  cut_tag "$bump" "$prerelease"
+}
+
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  main "$@"
 fi
-
-major="${base%%.*}"
-rest="${base#*.}"
-minor="${rest%%.*}"
-patch="${rest#*.}"
-
-case "$bump" in
-  major) major=$((major + 1)); minor=0; patch=0 ;;
-  minor) minor=$((minor + 1)); patch=0 ;;
-  patch) patch=$((patch + 1)) ;;
-esac
-
-# 5. Go requires a /vN suffix on the module path for major versions >= 2.
-#    Until the module path carries that suffix, refuse to mint such a tag.
-if [ "$major" -ge 2 ]; then
-  die "v${major}.x requires the module path to end in /v${major} (it is '$MODULE_PATH'); update go.mod and this script before a major bump"
-fi
-
-version="v${major}.${minor}.${patch}"
-tag="${TAG_PREFIX}${major}.${minor}.${patch}"
-
-git rev-parse -q --verify "refs/tags/${tag}" >/dev/null &&
-  die "tag ${tag} already exists"
-
-echo "Releasing ${tag} (module version ${version}) at $(git rev-parse --short HEAD)"
-
-if [ "${RELEASE_DRY_RUN:-}" = "1" ]; then
-  echo "RELEASE_DRY_RUN=1 set; stopping before tag/push/release."
-  exit 0
-fi
-
-# 6. Tag HEAD and push. Use -c so we don't mutate the caller's git identity.
-git \
-  -c user.name="github-actions[bot]" \
-  -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-  tag -a "$tag" -m "$tag"
-git push origin "refs/tags/${tag}"
-
-# 7. Cut the GitHub Release from the tag we just pushed.
-gh release create "$tag" --title "$tag" --verify-tag --generate-notes
-
-# 8. Best-effort: prime the Go module proxy so `go get ...@${version}` resolves
-#    immediately instead of on first external fetch.
-curl -fsSL "https://proxy.golang.org/${MODULE_PATH}/@v/${version}.info" >/dev/null ||
-  echo "warning: proxy warm failed (non-fatal); the proxy will fetch on first use." >&2
-
-echo "Released ${tag}."

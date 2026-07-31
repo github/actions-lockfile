@@ -11,7 +11,6 @@ workflows:
         - 'actions/dependency-review-action@v4.9.0'
     '.github/workflows/release.yml':
         - 'actions/checkout@v4.3.1'
-        - 'actions/setup-go@v5.6.0'
 dependencies:
     'actions/checkout@v4.3.1':
         ref: 'v4.3.1'
