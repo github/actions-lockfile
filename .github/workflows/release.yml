@@ -39,6 +39,11 @@ jobs:
             echo "::error::Release tag '$GITHUB_REF_NAME' is not an annotated remote tag."
             exit 1
           fi
+          git fetch --quiet origin refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$commit" refs/remotes/origin/main; then
+            echo "::error::Release tag '$GITHUB_REF_NAME' is not in origin/main history."
+            exit 1
+          fi
           echo "version=${GITHUB_REF_NAME#go/}" >>"$GITHUB_OUTPUT"
 
       - name: Create GitHub Release

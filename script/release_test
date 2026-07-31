@@ -25,6 +25,16 @@ check go/v0.0.5-rc.3 patch 1 go/v0.0.5-rc.2 go/v0.0.5-rc.1 go/v0.0.4
 check go/v0.0.5 patch 0 go/v0.0.5-rc.2 go/v0.0.4
 check go/v0.1.0-rc.1 minor 1 go/v0.0.5-rc.2 go/v0.0.4
 
+tree="$(git rev-parse "HEAD^{tree}")"
+ancestor="$(printf 'ancestor\n' | git -c user.name=test -c user.email=test@example.com commit-tree "$tree")"
+descendant="$(printf 'descendant\n' | git -c user.name=test -c user.email=test@example.com commit-tree "$tree" -p "$ancestor")"
+unrelated="$(printf 'unrelated\n' | git -c user.name=test -c user.email=test@example.com commit-tree "$tree")"
+git merge-base --is-ancestor "$ancestor" "$descendant"
+if git merge-base --is-ancestor "$unrelated" "$descendant"; then
+  echo "expected unrelated commit to fail ancestry check" >&2
+  exit 1
+fi
+
 if [ "${1:-}" = "--current" ]; then
   [ "$#" -eq 3 ] || {
     echo "usage: script/release_test --current <expected-tag> <bump>" >&2
