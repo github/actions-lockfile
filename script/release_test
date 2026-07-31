@@ -1,46 +1,19 @@
 #!/usr/bin/env bash
-
 set -euo pipefail
 
-# shellcheck source=script/release
-source "$(dirname "$0")/release"
-
-check() {
-  local expected="$1"
-  local bump="$2"
-  local prerelease="$3"
-  shift 3
-
-  local actual
-  actual="$(printf '%s\n' "$@" | select_tag "$bump" "$prerelease")"
-  [ "$actual" = "$expected" ] || {
-    echo "expected $expected, got $actual" >&2
-    exit 1
-  }
-}
-
-check go/v0.0.5 patch 0 go/v0.0.4
-check go/v0.0.5-rc.1 patch 1 go/v0.0.4
-check go/v0.0.5-rc.3 patch 1 go/v0.0.5-rc.2 go/v0.0.5-rc.1 go/v0.0.4
-check go/v0.0.5 patch 0 go/v0.0.5-rc.2 go/v0.0.4
-check go/v0.1.0-rc.1 minor 1 go/v0.0.5-rc.2 go/v0.0.4
-
-tree="$(git rev-parse "HEAD^{tree}")"
-ancestor="$(printf 'ancestor\n' | git -c user.name=test -c user.email=test@example.com commit-tree "$tree")"
-descendant="$(printf 'descendant\n' | git -c user.name=test -c user.email=test@example.com commit-tree "$tree" -p "$ancestor")"
-unrelated="$(printf 'unrelated\n' | git -c user.name=test -c user.email=test@example.com commit-tree "$tree")"
-git merge-base --is-ancestor "$ancestor" "$descendant"
-if git merge-base --is-ancestor "$unrelated" "$descendant"; then
-  echo "expected unrelated commit to fail ancestry check" >&2
-  exit 1
-fi
+root="$(cd "$(dirname "$0")/.." && pwd)"
 
 if [ "${1:-}" = "--current" ]; then
   [ "$#" -eq 3 ] || {
     echo "usage: script/release_test --current <expected-tag> <bump>" >&2
     exit 1
   }
-  actual="$(git tag --list "${TAG_PREFIX}*" --sort=-v:refname | select_tag "$3" 1)"
+  actual="$(
+    cd "$root"
+    # shellcheck source=script/release
+    source script/release
+    git tag --list "${TAG_PREFIX}*" --sort=-v:refname | select_tag "$3" 1
+  )"
   [ "$actual" = "$2" ] || {
     echo "expected current tags to select $2, got $actual" >&2
     exit 1
@@ -48,4 +21,63 @@ if [ "${1:-}" = "--current" ]; then
   echo "current tags select $actual"
 fi
 
-echo "release tag selection passed"
+tmp="$(mktemp -d)"
+trap 'rm -r "$tmp"' EXIT
+
+git init --quiet --bare "$tmp/origin.git"
+git clone --quiet "$tmp/origin.git" "$tmp/repo"
+cd "$tmp/repo"
+git config user.name test
+git config user.email test@example.com
+git switch --quiet -c main
+mkdir -p go script
+cp "$root/script/release" script/release
+cp "$root/script/verify-release-tag" script/verify-release-tag
+touch tracked
+git add .
+git commit --quiet -m initial
+git push --quiet -u origin main
+git tag -a v1.2.3 -m v1.2.3
+git push --quiet origin refs/tags/v1.2.3
+git tag -a go/v1.2.3 -m go/v1.2.3
+git push --quiet origin refs/tags/go/v1.2.3
+
+mkdir "$tmp/bin"
+printf '#!/bin/sh\nexit 0\n' >"$tmp/bin/make"
+printf '#!/bin/sh\necho github.com/github/actions-lockfile/go\n' >"$tmp/bin/go"
+chmod +x "$tmp/bin/make" "$tmp/bin/go"
+export PATH="$tmp/bin:$PATH"
+
+output="$(RELEASE_DRY_RUN=1 script/release patch --rc)"
+[[ "$output" == *"Cutting go/v1.2.4-rc.1 "* ]]
+
+git tag -a go/v1.2.4-rc.1 -m go/v1.2.4-rc.1
+git push --quiet origin refs/tags/go/v1.2.4-rc.1
+output="$(RELEASE_DRY_RUN=1 script/release patch --rc)"
+[[ "$output" == *"Cutting go/v1.2.4-rc.2 "* ]]
+
+output="$(RELEASE_DRY_RUN=1 script/release patch)"
+[[ "$output" == *"Cutting go/v1.2.4 "* ]]
+
+ancestor="$(git rev-parse HEAD)"
+tree="$(git rev-parse "${ancestor}^{tree}")"
+descendant="$(printf 'descendant\n' | git -c user.name=test -c user.email=test@example.com commit-tree "$tree" -p "$ancestor")"
+git update-ref refs/heads/main "$descendant"
+git push --quiet origin refs/heads/main
+script/verify-release-tag v1.2.3 v
+script/verify-release-tag go/v1.2.3 go/v
+
+if script/verify-release-tag v1.2.3 invalid 2>/dev/null; then
+  echo "expected invalid prefix to fail verification" >&2
+  exit 1
+fi
+
+unrelated="$(printf 'unrelated\n' | git -c user.name=test -c user.email=test@example.com commit-tree "$tree")"
+git tag -a go/v1.2.5 -m go/v1.2.5 "$unrelated"
+git push --quiet origin refs/tags/go/v1.2.5
+if script/verify-release-tag go/v1.2.5 go/v 2>/dev/null; then
+  echo "expected unrelated commit to fail ancestry check" >&2
+  exit 1
+fi
+
+echo "release tag selection and verification: ok"

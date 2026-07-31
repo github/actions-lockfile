@@ -29,21 +29,7 @@ jobs:
       - name: Verify tag
         id: tag
         run: |
-          if [[ ! "$GITHUB_REF_NAME" =~ ^go/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.[1-9][0-9]*)?$ ]]; then
-            echo "::error::Invalid release tag '$GITHUB_REF_NAME'; expected go/vX.Y.Z or go/vX.Y.Z-rc.N."
-            exit 1
-          fi
-          commit="$(git rev-list -n 1 "$GITHUB_REF_NAME")"
-          remote_commit="$(git ls-remote --tags origin "refs/tags/${GITHUB_REF_NAME}^{}" | awk 'NR == 1 { print $1 }')"
-          if [ "$(git cat-file -t "refs/tags/$GITHUB_REF_NAME")" != "tag" ] || [ "$remote_commit" != "$commit" ]; then
-            echo "::error::Release tag '$GITHUB_REF_NAME' is not an annotated remote tag."
-            exit 1
-          fi
-          git fetch --quiet origin refs/heads/main:refs/remotes/origin/main
-          if ! git merge-base --is-ancestor "$commit" refs/remotes/origin/main; then
-            echo "::error::Release tag '$GITHUB_REF_NAME' is not in origin/main history."
-            exit 1
-          fi
+          script/verify-release-tag "$GITHUB_REF_NAME" go/v
           echo "version=${GITHUB_REF_NAME#go/}" >>"$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
