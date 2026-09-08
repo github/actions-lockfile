@@ -10,13 +10,13 @@ standalone module so consumers can import it on its own.
 From a clean, current `main`, preview the next release:
 
 ```sh
-RELEASE_DRY_RUN=1 script/release patch
+RELEASE_DRY_RUN=1 script/release patch --stable
 ```
 
 Then cut it:
 
 ```sh
-script/release patch
+script/release patch --stable
 ```
 
 To preview a release candidate instead:
@@ -32,7 +32,7 @@ script/release patch --rc
 ```
 
 The first candidate is `go/vX.Y.Z-rc.1`; repeating the same bump increments
-`rc.N`. Run the bump without `--rc` to publish the stable `go/vX.Y.Z`.
+`rc.N`. Use `--stable` to publish the stable `go/vX.Y.Z`.
 
 Use `patch` for compatible fixes, `minor` for compatible additions, and
 `major` for breaking changes.

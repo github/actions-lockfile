@@ -3,7 +3,7 @@
 # Cut a release tag for the Go sub-module.
 #
 # Usage:
-#   script/release <patch|minor|major> [--rc]
+#   script/release <patch|minor|major> <--stable|--rc>
 #
 # The next version is computed from the latest go/vX.Y.Z tag and the chosen
 # bump. Maintainers run this locally to validate and push an annotated tag.
@@ -174,21 +174,20 @@ cut_tag() {
 main() {
   cd "$(dirname "$0")/.."
 
+  [ "$#" -eq 2 ] ||
+    die "usage: script/release <patch|minor|major> <--stable|--rc>"
+
   local bump="${1:-}"
   case "$bump" in
     patch | minor | major) ;;
-    *) die "usage: script/release <patch|minor|major> [--rc]" ;;
+    *) die "usage: script/release <patch|minor|major> <--stable|--rc>" ;;
   esac
 
-  local prerelease=0
-  case "$#" in
-    1) ;;
-    2)
-      [ "$2" = "--rc" ] ||
-        die "usage: script/release <patch|minor|major> [--rc]"
-      prerelease=1
-      ;;
-    *) die "usage: script/release <patch|minor|major> [--rc]" ;;
+  local prerelease
+  case "$2" in
+    --stable) prerelease=0 ;;
+    --rc) prerelease=1 ;;
+    *) die "usage: script/release <patch|minor|major> <--stable|--rc>" ;;
   esac
 
   cut_tag "$bump" "$prerelease"
