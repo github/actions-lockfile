@@ -69,7 +69,7 @@ func newYAMLParseError(err error) *ParseError {
 }
 
 // Version is the latest lockfile schema version this binary writes.
-const Version = "v0.0.2"
+const Version = "v0.0.3"
 
 // Path is the canonical repo-relative location of the dependency lockfile.
 const Path = ".github/workflows/actions.lock"
@@ -80,12 +80,13 @@ const CLIName = "gh actions-lock"
 // File is the parsed lockfile shape.
 //
 //	# .github/workflows/actions.lock
-//	version: v0.0.1
+//	version: v0.0.3
 //	workflows:
 //	  .github/workflows/deploy.yml:
 //	    - actions/checkout@v6
 //	dependencies:
 //	  actions/checkout@v4.3.1:
+//	    hostname: github.com
 //	    ref: v4.3.1
 //	    commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
 //	    owner_id: 44036562
@@ -215,19 +216,22 @@ func (f File) LookupWorkflow(workflowKey string) ([]string, bool) {
 
 // Action carries the per-action metadata recorded under a pin key.
 //
-// Ref is the git ref the commit was resolved from (required). Commit is the
-// digest in algo-prefixed form (e.g. "sha1-abc123...", "sha256-def456..."),
-// matching the digest in the pin key (required). OwnerID and RepoID are the
-// GitHub numeric IDs for the owner and repository, used to detect a repository
-// transfer (the name changes but the ID does not). Uses lists the action's
-// direct nested dependencies as canonical pin keys — empty for leaf actions,
-// populated for composite actions.
+// Hostname is the optional bare canonical hostname of the GitHub instance that
+// owns the dependency: github.com or a lowercase GHE tenant hostname such as
+// octocorp.ghe.com. It is empty when omitted. Ref is the git ref the commit was
+// resolved from (required). Commit is the digest in algo-prefixed form (e.g.
+// "sha1-abc123...", "sha256-def456...") (required). OwnerID and RepoID are the
+// host-specific numeric IDs for the owner and repository, used to detect a
+// repository transfer (the name changes but the ID does not). Uses lists the
+// action's direct nested dependencies as canonical pin keys — empty for leaf
+// actions, populated for composite actions.
 type Action struct {
-	Ref     string   `yaml:"ref,omitempty"`
-	Commit  string   `yaml:"commit,omitempty"`
-	OwnerID int64    `yaml:"owner_id"`
-	RepoID  int64    `yaml:"repo_id"`
-	Uses    []string `yaml:"uses,omitempty"`
+	Hostname string   `yaml:"hostname,omitempty"`
+	Ref      string   `yaml:"ref,omitempty"`
+	Commit   string   `yaml:"commit,omitempty"`
+	OwnerID  int64    `yaml:"owner_id"`
+	RepoID   int64    `yaml:"repo_id"`
+	Uses     []string `yaml:"uses,omitempty"`
 }
 
 // MaxParseSize is the maximum number of bytes Parse accepts. Larger inputs are
@@ -353,9 +357,10 @@ var allowedFileKeys = map[string]struct{}{
 	"dependencies": {},
 }
 
-// allowedActionKeys is the set of permitted keys within a v0.0.2 dependency's
+// allowedActionKeys is the set of permitted keys within a v0.0.3 dependency's
 // Action mapping.
 var allowedActionKeys = map[string]struct{}{
+	"hostname": {},
 	"ref":      {},
 	"commit":   {},
 	"owner_id": {},
@@ -363,14 +368,21 @@ var allowedActionKeys = map[string]struct{}{
 	"uses":     {},
 }
 
-// requiredActionKeys lists the keys every v0.0.2 dependency's Action mapping
+// requiredActionKeys lists the keys every v0.0.3 dependency's Action mapping
 // must carry, in report order.
 var requiredActionKeys = []string{"ref", "commit", "owner_id", "repo_id"}
 
-// nonEmptyStringKeys lists action fields that must be non-empty strings.
+// canonicalHostnamePattern matches github.com or a single lowercase DNS tenant
+// label under ghe.com.
+const canonicalHostnamePattern = `^(github\.com|[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.ghe\.com)$`
+
+var canonicalHostnameRE = regexp.MustCompile(canonicalHostnamePattern)
+
+// nonEmptyStringKeys lists action fields that must be non-empty when present.
 var nonEmptyStringKeys = map[string]struct{}{
-	"ref":    {},
-	"commit": {},
+	"hostname": {},
+	"ref":      {},
+	"commit":   {},
 }
 
 // positiveIntKeys lists action fields that must be positive integers (> 0).
@@ -379,14 +391,22 @@ var positiveIntKeys = map[string]struct{}{
 	"repo_id":  {},
 }
 
-// rejectZeroValues checks that required action fields carry meaningful values:
-// commit must be a valid algo-hex digest, ID fields must be positive, and
-// nonEmptyStringKeys must not be blank. A present-but-zero value would silently
-// disable the security check it enforces.
+// rejectZeroValues checks that action fields carry meaningful values when
+// present: commit must be a valid algo-hex digest, ID fields must be positive,
+// and nonEmptyStringKeys must not be blank. A present-but-zero value would
+// silently disable the security check it enforces.
 func rejectZeroValues(action *yaml.Node, dep string) *ParseError {
 	for j := 0; j+1 < len(action.Content); j += 2 {
 		key := action.Content[j]
 		val := action.Content[j+1]
+
+		if key.Value == "hostname" && (val.Kind != yaml.ScalarNode || val.Tag != "!!str") {
+			return &ParseError{
+				Line:   val.Line,
+				Column: val.Column,
+				Msg:    fmt.Sprintf("action field %q must be a string for dependency %q", key.Value, dep),
+			}
+		}
 
 		if _, ok := nonEmptyStringKeys[key.Value]; ok {
 			if val.Value == "" {
@@ -395,6 +415,14 @@ func rejectZeroValues(action *yaml.Node, dep string) *ParseError {
 					Column: val.Column,
 					Msg:    fmt.Sprintf("action field %q must not be empty for dependency %q", key.Value, dep),
 				}
+			}
+		}
+
+		if key.Value == "hostname" && val.Value != "" && !canonicalHostnameRE.MatchString(val.Value) {
+			return &ParseError{
+				Line:   val.Line,
+				Column: val.Column,
+				Msg:    fmt.Sprintf("action field %q must be \"github.com\" or a lowercase canonical GHE tenant hostname for dependency %q, got %q", key.Value, dep, val.Value),
 			}
 		}
 
@@ -522,7 +550,7 @@ func canonicalizeActions(f *File) (string, error) {
 }
 
 func equalAction(a, b Action) bool {
-	if a.Ref != b.Ref || a.Commit != b.Commit ||
+	if a.Hostname != b.Hostname || a.Ref != b.Ref || a.Commit != b.Commit ||
 		a.OwnerID != b.OwnerID || a.RepoID != b.RepoID {
 		return false
 	}

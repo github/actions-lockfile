@@ -9,7 +9,7 @@ import (
 
 // supportedVersions lists all schema versions this binary can parse,
 // ordered from oldest to newest.
-var supportedVersions = []string{"v0.0.1", "v0.0.2"}
+var supportedVersions = []string{"v0.0.1", "v0.0.2", "v0.0.3"}
 
 // ErrUnsupportedVersion is the sentinel returned when ParseWithPolicy refuses a
 // lockfile whose version is older than the consumer's minimum.
@@ -88,9 +88,17 @@ func parseInternal(contents []byte, policy *VersionPolicy, paths []string) (File
 		return File{}, pe
 	}
 
-	// For v0.0.1 files, migrate branch/tag → ref and canonicalize legacy pin keys.
+	// v0.0.1 and v0.0.2 were dotcom-only. Normalize their in-memory
+	// representation without changing the parsed YAML tree.
 	if f.Version == "v0.0.1" {
 		migrateV001Actions(&f)
+	}
+	if f.Version == "v0.0.1" || f.Version == "v0.0.2" {
+		migrateLegacyHostnames(&f)
+	}
+
+	// For v0.0.1 files, canonicalize legacy pin keys.
+	if f.Version == "v0.0.1" {
 		if conflictKey, err := canonicalizeActionsV001(&f); err != nil {
 			pe := &ParseError{Msg: err.Error(), err: err}
 			if l, c, ok := f.KeyPosition("dependencies", conflictKey); ok {
@@ -218,9 +226,21 @@ func positionFromNode(node *yaml.Node, key string) (line, col int, ok bool) {
 	return v.Line, v.Column, true
 }
 
-// ── v0.0.1 compat layer ─────────────────────────────────────────────────────
+// ── Legacy compatibility ─────────────────────────────────────────────────────
 
-// allowedActionKeysV001 extends the v0.0.2 set with the legacy branch/tag fields.
+const legacyDotcomHostname = "github.com"
+
+// migrateLegacyHostnames defaults dependencies from the dotcom-only schemas to
+// github.com. It updates only the decoded File; the retained YAML node remains
+// an exact representation of the caller's input.
+func migrateLegacyHostnames(f *File) {
+	for key, action := range f.Dependencies {
+		action.Hostname = legacyDotcomHostname
+		f.Dependencies[key] = action
+	}
+}
+
+// allowedActionKeysV001 describes the legacy branch/tag action shape.
 var allowedActionKeysV001 = map[string]struct{}{
 	"tag":      {},
 	"branch":   {},
@@ -232,6 +252,17 @@ var allowedActionKeysV001 = map[string]struct{}{
 
 // requiredActionKeysV001 — v0.0.1 did not require ref (it used tag/branch).
 var requiredActionKeysV001 = []string{"commit", "owner_id", "repo_id"}
+
+// v0.0.2 introduced ref and the current pin grammar but had no hostname.
+var allowedActionKeysV002 = map[string]struct{}{
+	"ref":      {},
+	"commit":   {},
+	"owner_id": {},
+	"repo_id":  {},
+	"uses":     {},
+}
+
+var requiredActionKeysV002 = []string{"ref", "commit", "owner_id", "repo_id"}
 
 // migrateV001Actions walks the YAML node tree for a v0.0.1 lockfile and
 // populates Action.Ref from the tag/branch fields using BestRef.
@@ -404,9 +435,13 @@ func validateKnownFieldsVersioned(f *File, paths []string, version string) *Pars
 	allowed := allowedActionKeys
 	required := requiredActionKeys
 
-	if version == "v0.0.1" {
+	switch version {
+	case "v0.0.1":
 		allowed = allowedActionKeysV001
 		required = requiredActionKeysV001
+	case "v0.0.2":
+		allowed = allowedActionKeysV002
+		required = requiredActionKeysV002
 	}
 
 	root := docMapping(f.node)
@@ -424,26 +459,22 @@ func validateKnownFieldsVersioned(f *File, paths []string, version string) *Pars
 		return nil
 	}
 
-	var inScope map[string]struct{}
-	if len(paths) > 0 {
-		inScope = make(map[string]struct{})
-		for _, p := range paths {
-			for _, pin := range f.Workflows[p] {
-				inScope[pin] = struct{}{}
-			}
-		}
-	}
+	inScope := scopedDependencyPins(f, paths, version)
 
 	for i := 0; i+1 < len(deps.Content); i += 2 {
 		pinKey := deps.Content[i]
 		action := deps.Content[i+1]
-		if action.Kind != yaml.MappingNode {
-			continue
-		}
 
 		if inScope != nil {
-			if _, ok := inScope[pinKey.Value]; !ok {
+			if _, ok := inScope[canonicalPinForVersion(pinKey.Value, version)]; !ok {
 				continue
+			}
+		}
+		if action.Kind != yaml.MappingNode {
+			return &ParseError{
+				Line:   action.Line,
+				Column: action.Column,
+				Msg:    fmt.Sprintf("action metadata for dependency %q must be a mapping", pinKey.Value),
 			}
 		}
 
@@ -482,6 +513,55 @@ func validateKnownFieldsVersioned(f *File, paths []string, version string) *Pars
 		}
 	}
 	return nil
+}
+
+func scopedDependencyPins(f *File, paths []string, version string) map[string]struct{} {
+	if len(paths) == 0 {
+		return nil
+	}
+
+	actionsByPin := make(map[string][]Action, len(f.Dependencies))
+	for key, action := range f.Dependencies {
+		pin := canonicalPinForVersion(key, version)
+		actionsByPin[pin] = append(actionsByPin[pin], action)
+	}
+
+	inScope := make(map[string]struct{})
+	var pending []string
+	for _, path := range paths {
+		for _, pin := range f.Workflows[path] {
+			pending = append(pending, canonicalPinForVersion(pin, version))
+		}
+	}
+
+	for len(pending) > 0 {
+		pin := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
+		if _, seen := inScope[pin]; seen {
+			continue
+		}
+		inScope[pin] = struct{}{}
+		for _, action := range actionsByPin[pin] {
+			for _, used := range action.Uses {
+				pending = append(pending, canonicalPinForVersion(used, version))
+			}
+		}
+	}
+
+	return inScope
+}
+
+func canonicalPinForVersion(value, version string) string {
+	if version == "v0.0.1" {
+		if pin, ok := parsePinV001(value); ok {
+			return pin.String()
+		}
+		return value
+	}
+	if pin, ok := ParsePin(value); ok {
+		return pin.String()
+	}
+	return value
 }
 
 // rejectDuplicateDependencyKeys walks the top-level `dependencies` mapping and

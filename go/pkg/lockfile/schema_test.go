@@ -3,6 +3,7 @@ package lockfile
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"testing"
 
@@ -17,6 +18,7 @@ func TestSchema_EmbeddedMatchesRootInvariant(t *testing.T) {
 	}{
 		{"v0.0.1", "../../../schema/lockfile-v0.0.1.json"},
 		{"v0.0.2", "../../../schema/lockfile-v0.0.2.json"},
+		{"v0.0.3", "../../../schema/lockfile-v0.0.3.json"},
 	} {
 		t.Run(ver.version, func(t *testing.T) {
 			rootSchema, err := os.ReadFile(ver.file)
@@ -71,6 +73,13 @@ func TestSchema_EmbeddedMatchesEnforcement(t *testing.T) {
 
 	assert.ElementsMatch(t, doc.Defs.Action.Required, requiredActionKeys,
 		"schema action.required must match the keys enforcement requires")
+
+	var hostnameSchema struct {
+		Pattern string `json:"pattern"`
+	}
+	require.NoError(t, json.Unmarshal(doc.Defs.Action.Properties["hostname"], &hostnameSchema))
+	assert.Equal(t, canonicalHostnamePattern, hostnameSchema.Pattern,
+		"schema hostname pattern must match parser enforcement")
 }
 
 func TestParse_UnknownTopLevelFieldRejected(t *testing.T) {
@@ -125,6 +134,98 @@ dependencies:
 	assert.Contains(t, pe.Msg, "actions/checkout@v4", "message should name the offending dependency")
 	assert.Equal(t, 3, pe.Line, "error anchors on the dependency's pin key")
 	assert.Greater(t, pe.Column, 0, "expected a column anchored on the pin key")
+}
+
+func TestParse_OmittedHostnameAccepted(t *testing.T) {
+	yaml := `version: v0.0.3
+dependencies:
+  actions/checkout@v4:
+    ref: v4
+    commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
+    owner_id: 1
+    repo_id: 2
+`
+	f, err := Parse([]byte(yaml))
+	require.NoError(t, err)
+	assert.Empty(t, f.Dependencies["actions/checkout@v4"].Hostname)
+}
+
+func v003WithHostname(hostname string) []byte {
+	return []byte(fmt.Sprintf(`version: v0.0.3
+dependencies:
+  actions/checkout@v4:
+    hostname: %q
+    ref: v4
+    commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
+    owner_id: 1
+    repo_id: 2
+`, hostname))
+}
+
+func TestParse_EmptyHostnameRejected(t *testing.T) {
+	_, err := Parse(v003WithHostname(""))
+	require.Error(t, err)
+
+	var pe *ParseError
+	require.True(t, errors.As(err, &pe), "expected a *ParseError, got %T", err)
+	assert.Contains(t, pe.Msg, `"hostname"`)
+	assert.Contains(t, pe.Msg, "must not be empty")
+}
+
+func TestParse_NullHostnameRejected(t *testing.T) {
+	yaml := `version: v0.0.3
+dependencies:
+  actions/checkout@v4:
+    hostname: null
+    ref: v4
+    commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
+    owner_id: 1
+    repo_id: 2
+`
+	_, err := Parse([]byte(yaml))
+	require.Error(t, err)
+
+	var pe *ParseError
+	require.True(t, errors.As(err, &pe), "expected a *ParseError, got %T", err)
+	assert.Contains(t, pe.Msg, `"hostname"`)
+	assert.Contains(t, pe.Msg, "must be a string")
+}
+
+func TestParse_CanonicalHostnamesAccepted(t *testing.T) {
+	for _, hostname := range []string{"github.com", "octocorp.ghe.com", "octo-corp1.ghe.com"} {
+		t.Run(hostname, func(t *testing.T) {
+			f, err := Parse(v003WithHostname(hostname))
+			require.NoError(t, err)
+			assert.Equal(t, hostname, f.Dependencies["actions/checkout@v4"].Hostname)
+		})
+	}
+}
+
+func TestParse_NonCanonicalHostnameRejected(t *testing.T) {
+	for _, hostname := range []string{
+		"example.com",
+		"GITHUB.COM",
+		"https://github.com",
+		"github.com:443",
+		"github.com/path",
+		"github.com?tenant=octocorp",
+		"github.com#fragment",
+		" github.com",
+		"github.com ",
+		"api.octocorp.ghe.com",
+		"-octocorp.ghe.com",
+		"octocorp-.ghe.com",
+	} {
+		t.Run(hostname, func(t *testing.T) {
+			_, err := Parse(v003WithHostname(hostname))
+			require.Error(t, err)
+
+			var pe *ParseError
+			require.True(t, errors.As(err, &pe), "expected a *ParseError, got %T", err)
+			assert.Contains(t, pe.Msg, `"hostname"`)
+			assert.Contains(t, pe.Msg, "canonical GHE tenant hostname")
+		})
+	}
 }
 
 func TestParse_EmptyCommitRejected(t *testing.T) {
@@ -200,12 +301,13 @@ dependencies:
 }
 
 func TestParse_KnownFieldsAccepted(t *testing.T) {
-	yaml := `version: v0.0.2
+	yaml := `version: v0.0.3
 workflows:
   .github/workflows/ci.yml:
     - actions/checkout@v4
 dependencies:
   actions/checkout@v4:
+    hostname: octocorp.ghe.com
     ref: v4
     commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
     owner_id: 1
@@ -217,6 +319,7 @@ dependencies:
 	require.NoError(t, err)
 	assert.Len(t, f.Dependencies, 1)
 	assert.Contains(t, f.Workflows, ".github/workflows/ci.yml")
+	assert.Equal(t, "octocorp.ghe.com", f.Dependencies["actions/checkout@v4"].Hostname)
 }
 
 // corruptLockfile is a shared fixture for scoped-validation tests: goodPin is
@@ -269,6 +372,73 @@ func TestParse_ScopedValidation_CorruptPathOnly_Errors(t *testing.T) {
 	require.True(t, errors.As(err, &pe))
 	assert.Contains(t, pe.Msg, `missing required action field "commit"`)
 	assert.Contains(t, pe.Msg, corruptPin)
+}
+
+func TestParse_ScopedValidation_CanonicalPinStillValidatesHostname(t *testing.T) {
+	data := `version: v0.0.3
+workflows:
+  .github/workflows/a.yml:
+    - Actions/Checkout@v4
+dependencies:
+  actions/checkout@v4:
+    hostname: null
+    ref: v4
+    commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
+    owner_id: 1
+    repo_id: 2
+`
+	_, err := Parse([]byte(data), ".github/workflows/a.yml")
+	require.Error(t, err)
+
+	var pe *ParseError
+	require.True(t, errors.As(err, &pe))
+	assert.Contains(t, pe.Msg, `action field "hostname" must be a string`)
+	assert.Contains(t, pe.Msg, "actions/checkout@v4")
+}
+
+func TestParse_ScopedValidation_ValidatesTransitiveUses(t *testing.T) {
+	data := `version: v0.0.3
+workflows:
+  .github/workflows/a.yml:
+    - actions/composite@v1
+dependencies:
+  actions/composite@v1:
+    ref: v1
+    commit: sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    owner_id: 1
+    repo_id: 2
+    uses:
+      - actions/cache@v4
+  actions/cache@v4:
+    hostname: null
+    ref: v4
+    commit: sha1-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    owner_id: 3
+    repo_id: 4
+`
+	_, err := Parse([]byte(data), ".github/workflows/a.yml")
+	require.Error(t, err)
+
+	var pe *ParseError
+	require.True(t, errors.As(err, &pe))
+	assert.Contains(t, pe.Msg, `action field "hostname" must be a string`)
+	assert.Contains(t, pe.Msg, "actions/cache@v4")
+}
+
+func TestParse_ScopedValidation_NullDependencyRejected(t *testing.T) {
+	data := `version: v0.0.3
+workflows:
+  .github/workflows/a.yml:
+    - actions/checkout@v4
+dependencies:
+  actions/checkout@v4: null
+`
+	_, err := Parse([]byte(data), ".github/workflows/a.yml")
+	require.Error(t, err)
+
+	var pe *ParseError
+	require.True(t, errors.As(err, &pe))
+	assert.Contains(t, pe.Msg, `action metadata for dependency "actions/checkout@v4" must be a mapping`)
 }
 
 func TestParse_ScopedValidation_AbsentPath_FailOpen(t *testing.T) {

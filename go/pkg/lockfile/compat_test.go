@@ -33,11 +33,47 @@ dependencies:
 
 	// Pin keys are canonicalized to the v0.0.2 format (no :algo-hex suffix).
 	checkout := f.Dependencies["actions/checkout@v4"]
+	assert.Equal(t, "github.com", checkout.Hostname)
 	assert.Equal(t, "v4", checkout.Ref)
 	assert.Equal(t, "sha1-11bd71901bbe5b1630ceea73d27597364c9af683", checkout.Commit)
 
 	internal := f.Dependencies["actions/internal@trunk"]
+	assert.Equal(t, "github.com", internal.Hostname)
 	assert.Equal(t, "trunk", internal.Ref)
+}
+
+func TestParse_V002_HostnameDefaultsToDotcomWithoutMutatingInput(t *testing.T) {
+	input := []byte(`version: v0.0.2
+dependencies:
+  actions/checkout@v4:
+    ref: v4
+    commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683
+    owner_id: 1
+    repo_id: 2
+`)
+	original := append([]byte(nil), input...)
+
+	f, err := Parse(input)
+	require.NoError(t, err)
+
+	assert.Equal(t, Version, f.Version)
+	assert.Equal(t, "github.com", f.Dependencies["actions/checkout@v4"].Hostname)
+	assert.Equal(t, original, input, "Parse must not rewrite caller-owned lockfile bytes")
+}
+
+func TestParse_V002_HostnameFieldRejected(t *testing.T) {
+	input := `version: v0.0.2
+dependencies:
+  actions/checkout@v4:
+    hostname: github.com
+    ref: v4
+    commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683
+    owner_id: 1
+    repo_id: 2
+`
+	_, err := Parse([]byte(input))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown action field "hostname"`)
 }
 
 func TestParse_V001_TagWinsOverBranch(t *testing.T) {
@@ -140,18 +176,20 @@ dependencies:
 // ── VersionPolicy tests ──────────────────────────────────────────────────────
 
 func TestParseWithPolicy_AcceptsVersionInRange(t *testing.T) {
-	input := `version: v0.0.2
+	input := `version: v0.0.3
 dependencies:
   actions/checkout@v4:
+    hostname: octocorp.ghe.com
     ref: v4
     commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683
     owner_id: 1
     repo_id: 2
 `
-	policy := VersionPolicy{Min: "v0.0.1", Max: "v0.0.2"}
+	policy := VersionPolicy{Min: "v0.0.1", Max: "v0.0.3"}
 	f, err := ParseWithPolicy([]byte(input), policy)
 	require.NoError(t, err)
 	assert.Equal(t, Version, f.Version)
+	assert.Equal(t, "octocorp.ghe.com", f.Dependencies["actions/checkout@v4"].Hostname)
 }
 
 func TestParseWithPolicy_RejectsVersionBelowMin(t *testing.T) {
@@ -171,10 +209,16 @@ dependencies:
 }
 
 func TestParseWithPolicy_RejectsVersionAboveMax(t *testing.T) {
-	input := `version: v0.0.2
-dependencies: {}
+	input := `version: v0.0.3
+dependencies:
+  actions/checkout@v4:
+    hostname: octocorp.ghe.com
+    ref: v4
+    commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683
+    owner_id: 1
+    repo_id: 2
 `
-	policy := VersionPolicy{Min: "v0.0.1", Max: "v0.0.1"}
+	policy := VersionPolicy{Min: "v0.0.1", Max: "v0.0.2"}
 	_, err := ParseWithPolicy([]byte(input), policy)
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrFutureVersion))
@@ -194,6 +238,7 @@ dependencies:
 	f, err := ParseWithPolicy([]byte(input), policy)
 	require.NoError(t, err)
 	assert.Equal(t, Version, f.Version, "parsed file should be normalized to latest version")
+	assert.Equal(t, "github.com", f.Dependencies["actions/checkout@v4"].Hostname)
 	assert.Equal(t, "v4", f.Dependencies["actions/checkout@v4"].Ref)
 }
 
@@ -201,7 +246,7 @@ func TestParseWithPolicy_UnknownFutureVersion(t *testing.T) {
 	input := `version: v1.0.0
 dependencies: {}
 `
-	policy := VersionPolicy{Min: "v0.0.1", Max: "v0.0.2"}
+	policy := VersionPolicy{Min: "v0.0.1", Max: "v0.0.3"}
 	_, err := ParseWithPolicy([]byte(input), policy)
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrFutureVersion))

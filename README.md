@@ -2,7 +2,7 @@
 
 > [!NOTE]
 > **Public preview.** This project is pre-1.0 and under active development. The
-> lockfile schema (currently `v0.0.2`) and the Go module's exported surface may
+> lockfile schema (currently `v0.0.3`) and the Go module's exported surface may
 > change before a `v1.0.0` release. Pin to an exact version and expect breaking
 > changes between minor versions until then.
 
@@ -89,14 +89,14 @@ _ = file
 The lockfile is a YAML document whose shape is defined by a JSON Schema 2020-12
 document embedded in the package and reachable via `lockfile.Schema()`.
 
-The current schema version is `v0.0.2`
-([`schema/lockfile-v0.0.2.json`](https://github.com/github/actions-lockfile/blob/main/schema/lockfile-v0.0.2.json)).
+The current schema version is `v0.0.3`
+([`schema/lockfile-v0.0.3.json`](https://github.com/github/actions-lockfile/blob/main/schema/lockfile-v0.0.3.json)).
 The on-disk file lives at
 [`Path`](https://github.com/github/actions-lockfile/blob/main/go/pkg/lockfile/lockfile.go)
 (`.github/workflows/actions.lock`) and has three top-level keys:
 
 ```yaml
-version: v0.0.2
+version: v0.0.3
 workflows:
   # workflow path -> flat, transitive list of pin keys
   .github/workflows/release.yml:
@@ -114,18 +114,25 @@ A pin key is `OWNER/REPO@REF`. The same key appears in both `workflows` (as
 flat transitive lists) and `dependencies` (as deduplicated graph entries with
 `uses:` links to direct dependencies).
 
-The parser also reads v0.0.1 lockfiles (which used `tag`/`branch` fields and
-`:algo-hex` suffixed pin keys) and normalizes them to the v0.0.2 `File` struct.
-Use `ParseWithPolicy` with a `VersionPolicy` to control which versions are
-accepted.
+The `hostname` field is optional in v0.0.3. Dotcom-only producers may omit it.
+Hostname-aware producers running in Proxima record the canonical hostname for
+every direct and transitive dependency, including `github.com` dependencies in
+mixed graphs. When present, `hostname` must be the bare lowercase `github.com`
+hostname or a lowercase GHE tenant hostname such as `octocorp.ghe.com`.
+
+The parser also reads the dotcom-only v0.0.1 and v0.0.2 lockfiles, defaulting
+every dependency's `hostname` to `github.com` in memory. v0.0.1 `tag`/`branch`
+fields and `:algo-hex` suffixed pin keys are also normalized to the v0.0.3
+`File` struct. Parsing does not rewrite the source lockfile. Use
+`ParseWithPolicy` with a `VersionPolicy` to control which versions are accepted.
 
 ## Compatibility and stability
 
 - The Go module follows [semver](https://semver.org/). The publicly documented
   exported surface is intended to be stable across minor versions.
 - The lockfile schema is versioned independently. The current schema version
-  is `v0.0.2`, embedded in the package and emitted as the `version` field of
-  every lockfile. The parser reads both v0.0.1 and v0.0.2.
+  is `v0.0.3`, embedded in the package and emitted as the `version` field of
+  every lockfile. The parser reads v0.0.1 through v0.0.3.
 - Pre-1.0, the package reserves the right to remove any incidentally-exported
   helper not covered by the [Usage](#usage) and
   [What this package does](#what-this-package-does) sections. Those sections
