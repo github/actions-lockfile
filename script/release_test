@@ -56,8 +56,13 @@ git push --quiet origin refs/tags/go/v1.2.4-rc.1
 output="$(RELEASE_DRY_RUN=1 script/release patch --rc)"
 [[ "$output" == *"Cutting go/v1.2.4-rc.2 "* ]]
 
-output="$(RELEASE_DRY_RUN=1 script/release patch)"
+output="$(RELEASE_DRY_RUN=1 script/release patch --stable)"
 [[ "$output" == *"Cutting go/v1.2.4 "* ]]
+
+if RELEASE_DRY_RUN=1 script/release patch >/dev/null 2>&1; then
+  echo "expected missing release channel to fail" >&2
+  exit 1
+fi
 
 ancestor="$(git rev-parse HEAD)"
 tree="$(git rev-parse "${ancestor}^{tree}")"
