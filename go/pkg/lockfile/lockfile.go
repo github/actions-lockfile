@@ -86,7 +86,6 @@ const CLIName = "gh actions-lock"
 //	    - actions/checkout@v6
 //	dependencies:
 //	  actions/checkout@v4.3.1:
-//	    hostname: github.com
 //	    ref: v4.3.1
 //	    commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
 //	    owner_id: 44036562
@@ -216,9 +215,13 @@ func (f File) LookupWorkflow(workflowKey string) ([]string, bool) {
 
 // Action carries the per-action metadata recorded under a pin key.
 //
-// Hostname is the optional bare canonical hostname of the GitHub instance that
-// owns the dependency: github.com or a lowercase GHE tenant hostname such as
-// octocorp.ghe.com. It is empty when omitted. Ref is the git ref the commit was
+// Hostname is the GitHub instance that owns the dependency. Empty (omitted)
+// means the home host: the tenant on a GHE.com data-residency instance, or
+// github.com on github.com. Producers write it only as github.com, for
+// github.com-bound pins on a GHE.com data-residency instance. The parser
+// accepts github.com or a lowercase GHE tenant hostname such as
+// octocorp.ghe.com. Legacy v0.0.1/v0.0.2 files parse with Hostname set to
+// github.com. Ref is the git ref the commit was
 // resolved from (required). Commit is the digest in algo-prefixed form (e.g.
 // "sha1-abc123...", "sha256-def456...") (required). OwnerID and RepoID are the
 // host-specific numeric IDs for the owner and repository, used to detect a
