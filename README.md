@@ -114,10 +114,22 @@ A pin key is `OWNER/REPO@REF`. The same key appears in both `workflows` (as
 flat transitive lists) and `dependencies` (as deduplicated graph entries with
 `uses:` links to direct dependencies).
 
-The `hostname` field is optional in v0.0.3. Dotcom-only producers may omit it.
-Hostname-aware producers running in Proxima record the canonical hostname for
-every direct and transitive dependency, including `github.com` dependencies in
-mixed graphs. When present, `hostname` must be the bare lowercase `github.com`
+The `hostname` field is optional in v0.0.3. An omitted `hostname` binds the
+pin to the home host: the tenant (`<tenant>.ghe.com`) on a GHE.com
+data-residency instance, or `github.com` on github.com.
+
+- Producers must omit `hostname` for pins bound to the home host. The only
+  value producers write explicitly is `github.com`, for pins bound to
+  github.com while running on a GHE.com data-residency instance. Producers
+  never write a `*.ghe.com` hostname.
+- On github.com, `hostname` must be omitted or `github.com`. Any other value
+  is rejected.
+- On GHE.com data-residency instances, only v0.0.3 lockfiles are accepted.
+  v0.0.1 and v0.0.2 lockfiles used omission to mean github.com, so producers
+  migrate them to v0.0.3 with an explicit `github.com` hostname on every
+  dependency.
+
+Syntactically, a present `hostname` must be the bare lowercase `github.com`
 hostname or a lowercase GHE tenant hostname such as `octocorp.ghe.com`.
 
 The parser also reads the dotcom-only v0.0.1 and v0.0.2 lockfiles, defaulting

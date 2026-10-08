@@ -86,7 +86,6 @@ const CLIName = "gh actions-lock"
 //	    - actions/checkout@v6
 //	dependencies:
 //	  actions/checkout@v4.3.1:
-//	    hostname: github.com
 //	    ref: v4.3.1
 //	    commit: sha1-34e114876b0b11c390a56381ad16ebd13914f8d5
 //	    owner_id: 44036562
@@ -215,23 +214,24 @@ func (f File) LookupWorkflow(workflowKey string) ([]string, bool) {
 }
 
 // Action carries the per-action metadata recorded under a pin key.
-//
-// Hostname is the optional bare canonical hostname of the GitHub instance that
-// owns the dependency: github.com or a lowercase GHE tenant hostname such as
-// octocorp.ghe.com. It is empty when omitted. Ref is the git ref the commit was
-// resolved from (required). Commit is the digest in algo-prefixed form (e.g.
-// "sha1-abc123...", "sha256-def456...") (required). OwnerID and RepoID are the
-// host-specific numeric IDs for the owner and repository, used to detect a
-// repository transfer (the name changes but the ID does not). Uses lists the
-// action's direct nested dependencies as canonical pin keys — empty for leaf
-// actions, populated for composite actions.
 type Action struct {
-	Hostname string   `yaml:"hostname,omitempty"`
-	Ref      string   `yaml:"ref,omitempty"`
-	Commit   string   `yaml:"commit,omitempty"`
-	OwnerID  int64    `yaml:"owner_id"`
-	RepoID   int64    `yaml:"repo_id"`
-	Uses     []string `yaml:"uses,omitempty"`
+	// Hostname is the GitHub instance that owns the dependency. Empty means
+	// the home host: the tenant on a GHE.com data-residency instance, or
+	// github.com on github.com. Producers set it only to github.com, for
+	// github.com-bound pins on a GHE.com data-residency instance.
+	Hostname string `yaml:"hostname,omitempty"`
+	// Ref is the git ref the commit was resolved from (required).
+	Ref string `yaml:"ref,omitempty"`
+	// Commit is the digest in algo-prefixed form, e.g. "sha1-abc123..."
+	// (required).
+	Commit string `yaml:"commit,omitempty"`
+	// OwnerID and RepoID are the host-specific numeric IDs for the owner and
+	// repository, used to detect a transfer (the name changes, the ID does not).
+	OwnerID int64 `yaml:"owner_id"`
+	RepoID  int64 `yaml:"repo_id"`
+	// Uses lists the action's direct nested dependencies as canonical pin
+	// keys: empty for leaf actions, populated for composite actions.
+	Uses []string `yaml:"uses,omitempty"`
 }
 
 // MaxParseSize is the maximum number of bytes Parse accepts. Larger inputs are

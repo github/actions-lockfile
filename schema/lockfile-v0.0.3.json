@@ -38,7 +38,7 @@
       "required": ["ref", "commit", "owner_id", "repo_id"],
       "properties": {
         "hostname": {
-          "description": "The optional bare canonical hostname of the GitHub instance that owns and resolves this dependency. The value must be github.com or a lowercase GHE tenant hostname such as octocorp.ghe.com; schemes, ports, paths, query strings, fragments, and surrounding whitespace are not allowed.",
+          "description": "The GitHub instance that owns and resolves this dependency. Omitted means the home host: the tenant on a GHE.com data-residency instance, or github.com on github.com. Producers omit it for home-host pins and write github.com only for github.com-bound pins on a GHE.com data-residency instance. When present, the value must be github.com or a lowercase GHE tenant hostname such as octocorp.ghe.com; schemes, ports, paths, query strings, fragments, and surrounding whitespace are not allowed.",
           "type": "string",
           "minLength": 1,
           "pattern": "^(github\\.com|[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.ghe\\.com)$"
