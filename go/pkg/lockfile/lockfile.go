@@ -218,11 +218,8 @@ func (f File) LookupWorkflow(workflowKey string) ([]string, bool) {
 // Hostname is the GitHub instance that owns the dependency. Empty (omitted)
 // means the home host: the tenant on a GHE.com data-residency instance, or
 // github.com on github.com. Producers write it only as github.com, for
-// github.com-bound pins on a GHE.com data-residency instance. The parser
-// accepts github.com or a lowercase GHE tenant hostname such as
-// octocorp.ghe.com. Legacy v0.0.1/v0.0.2 files parse with Hostname set to
-// github.com. Ref is the git ref the commit was
-// resolved from (required). Commit is the digest in algo-prefixed form (e.g.
+// github.com-bound pins on a GHE.com data-residency instance. Ref is the git
+// ref the commit was resolved from (required). Commit is the digest in algo-prefixed form (e.g.
 // "sha1-abc123...", "sha256-def456...") (required). OwnerID and RepoID are the
 // host-specific numeric IDs for the owner and repository, used to detect a
 // repository transfer (the name changes but the ID does not). Uses lists the
