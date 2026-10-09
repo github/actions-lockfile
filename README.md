@@ -1,8 +1,8 @@
 # actions-lockfile
 
 > [!NOTE]
-> **Public preview.** This project is pre-1.0 and under active development. The
-> lockfile schema (currently `v0.0.3`) and the Go module's exported surface may
+> **Public preview.** This project is pre-1.0.0 and under active development. The
+> lockfile schema and the Go module's exported surface may
 > change before a `v1.0.0` release. Pin to an exact version and expect breaking
 > changes between minor versions until then.
 
