@@ -24,8 +24,9 @@ var (
 	// ErrRefMismatch reports an entry ref that differs from its pin key ref.
 	ErrRefMismatch = errors.New("entry ref does not match pin key ref")
 	// ErrRefNeedsRelock reports a legacy lockfile entry whose ref cannot be
-	// expressed as a tag or branch name. Re-resolve the dependency.
-	ErrRefNeedsRelock = errors.New("legacy entry has no tag or branch ref; re-lock the dependency")
+	// expressed as a tag or branch name. Delete the entry and lock the
+	// dependency again; regenerating the entry in place cannot recover a ref.
+	ErrRefNeedsRelock = errors.New("legacy entry has no tag or branch ref; delete the entry and lock the dependency again")
 )
 
 // RefError is returned when ref text fails validation. Err is one of the

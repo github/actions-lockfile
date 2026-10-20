@@ -155,7 +155,7 @@ every dependency's `hostname` to `github.com` in memory. v0.0.1 `tag`/`branch`
 fields and `:algo-hex` suffixed pin keys are also normalized to the v0.0.3
 `File` struct. A v0.0.1 entry with no valid tag or branch name to use as its
 `ref` (for example, a SHA-keyed entry with neither field) fails with
-`ErrRefNeedsRelock`. Parsing does not rewrite the source lockfile. Use
+`ErrRefNeedsRelock`; delete the entry and lock the dependency again. Parsing does not rewrite the source lockfile. Use
 `ParseWithPolicy` with a `VersionPolicy` to control which versions are accepted.
 
 ## Compatibility and stability
