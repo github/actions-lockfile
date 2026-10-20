@@ -5,12 +5,11 @@
 // Dependencies maps resolve every pinned action for a workflow.
 //
 // [ParseActionRef] parses a single workflow `uses:` string into its
-// owner/repo/ref components, returning nil for anything that is not a
-// repository action. [ParseReusableWorkflowRef] is its mirror for the
+// owner/repo/ref components, returning (nil, nil) for anything that is not a
+// repository action and a *[RefError] for a repository action whose ref is
+// invalid. [ParseReusableWorkflowRef] is its mirror for the
 // reusable-workflow shape (owner/repo/.github/workflows/name.yml@ref);
 // [IsLocalReusableWorkflow] handles the local ./.github/workflows/... shape.
-// Their Strict variants return an error when the ref is invalid, so callers can
-// fail closed instead of skipping the value.
 //
 // The text after "@" is parsed exactly once, by [ParsePinRef], into a
 // [PinRef]: either a full commit SHA ([CommitID]) or a validated tag or branch

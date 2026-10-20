@@ -31,22 +31,14 @@ func (a ActionRef) FullName() string {
 	return a.Owner + "/" + a.Repo
 }
 
-// ParseActionRef parses a `uses:` string into an ActionRef. It returns nil
-// for anything that is not a repository action — expression refs, local
-// paths, docker images, reusable workflow files, or any input whose
-// components are unsafe for the downstream URL/GraphQL builders. It also
-// returns nil for a repository action whose ref fails [ParsePinRef]; use
-// [ParseActionRefStrict] to tell that case apart and fail closed.
-func ParseActionRef(uses string) *ActionRef {
-	a, _ := ParseActionRefStrict(uses)
-	return a
-}
-
-// ParseActionRefStrict is ParseActionRef with an error for the case
-// ParseActionRef folds into nil: the input has the shape of a repository
-// action but the text after `@` is not a valid ref (a *[RefError]). It
-// returns (nil, nil) for inputs that are not repository actions.
-func ParseActionRefStrict(uses string) (*ActionRef, error) {
+// ParseActionRef parses a `uses:` string into an ActionRef. It returns
+// (nil, nil) for anything that is not a repository action — expression refs,
+// local paths, docker images, reusable workflow files, or any input whose
+// components are unsafe for the downstream URL/GraphQL builders. It returns
+// (nil, *[RefError]) when the input has the shape of a repository action but
+// the text after `@` fails [ParsePinRef]; callers must treat that as an error,
+// not skip it.
+func ParseActionRef(uses string) (*ActionRef, error) {
 	parsed, err := splitUsesRef(uses)
 	if parsed == nil {
 		return nil, nil
@@ -172,17 +164,9 @@ func (r ReusableWorkflowRef) FullName() string {
 // returns nil for anything else, including local reusable workflows
 // (./.github/workflows/...) — use IsLocalReusableWorkflow for those — and
 // nested paths, since reusable workflows must live directly under
-// .github/workflows/. It also returns nil when the ref fails [ParsePinRef];
-// use [ParseReusableWorkflowRefStrict] to fail closed on that case.
-func ParseReusableWorkflowRef(uses string) *ReusableWorkflowRef {
-	r, _ := ParseReusableWorkflowRefStrict(uses)
-	return r
-}
-
-// ParseReusableWorkflowRefStrict is ParseReusableWorkflowRef with a
-// *[RefError] when the input is a remote reusable workflow whose ref is
-// invalid. It returns (nil, nil) for any other shape.
-func ParseReusableWorkflowRefStrict(uses string) (*ReusableWorkflowRef, error) {
+// .github/workflows/. It returns (nil, *[RefError]) when the input is a remote
+// reusable workflow whose ref fails [ParsePinRef].
+func ParseReusableWorkflowRef(uses string) (*ReusableWorkflowRef, error) {
 	parsed, err := splitUsesRef(uses)
 	if parsed == nil {
 		return nil, nil

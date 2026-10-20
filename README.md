@@ -124,13 +124,13 @@ canonicalized to lowercase) or a short tag or branch name. A dependency's
 - When the pin key's `REF` is a name, `ref` must equal it exactly (names are
   case-sensitive). When the pin key's `REF` is a commit SHA, `ref` records the
   tag or branch that commit was found on.
-- Consumers resolve `ref` only by exact lookup of `refs/tags/<ref>` or
+- `ref` is resolved only by exact lookup of `refs/tags/<ref>` or
   `refs/heads/<ref>`, never as a revision expression.
 
 The Go API exposes these as typed values (`PinRef`, `RefName`, `CommitID`)
-rather than strings. `ParseActionRefStrict` and
-`ParseReusableWorkflowRefStrict` return an error for a `uses:` value whose ref
-is invalid, so callers can fail closed instead of skipping it.
+rather than strings. `ParseActionRef` and `ParseReusableWorkflowRef` return a
+`*RefError` for a `uses:` value whose ref is invalid; treat it as an error
+rather than skipping the value.
 
 The `hostname` field is optional in v0.0.3. An omitted `hostname` binds the
 pin to the home host: the tenant (`<tenant>.ghe.com`) on a GHE.com

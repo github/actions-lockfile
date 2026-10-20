@@ -24,8 +24,8 @@ var validRefNames = []string{
 	"release@2024",
 	"a@b",
 	"HEAD",
-	"v6.1.0-1-g373d742f768e", // describe-shaped; policy belongs to consumers
-	"pull/1/head",
+	"release-2024.1-rc.3",
+	"users/alice/topic",
 	"11bd71901bbe5b1630ceea73d27597364c9af68",   // 39 hex
 	"11bd71901bbe5b1630ceea73d27597364c9af6833", // 41 hex
 	"Main",
@@ -271,8 +271,8 @@ func TestRefName_YAMLRoundTrip(t *testing.T) {
 	assert.NotContains(t, string(out), "ref:")
 }
 
-func TestParseActionRefStrict(t *testing.T) {
-	a, err := ParseActionRefStrict("actions/checkout@v4")
+func TestParseActionRef_InvalidRef(t *testing.T) {
+	a, err := ParseActionRef("actions/checkout@v4")
 	require.NoError(t, err)
 	require.NotNil(t, a)
 	assert.Equal(t, RefKindName, a.Ref.Kind())
@@ -285,30 +285,29 @@ func TestParseActionRefStrict(t *testing.T) {
 		"actions/checkout@",
 		"actions/cache/save@-x",
 	} {
-		a, err := ParseActionRefStrict(in)
+		a, err := ParseActionRef(in)
 		assert.Nilf(t, a, "%q", in)
 		var re *RefError
 		assert.Truef(t, errors.As(err, &re), "%q: %v", in, err)
-		assert.Nilf(t, ParseActionRef(in), "%q", in)
 	}
 
 	for _, in := range []string{"./local", "docker://alpine", "actions/checkout", "a/b@${{ x }}", "o/r/.github/workflows/ci.yml@main~1"} {
-		a, err := ParseActionRefStrict(in)
+		a, err := ParseActionRef(in)
 		assert.Nilf(t, a, "%q", in)
 		assert.NoErrorf(t, err, "%q", in)
 	}
 }
 
-func TestParseReusableWorkflowRefStrict(t *testing.T) {
-	r, err := ParseReusableWorkflowRefStrict("o/r/.github/workflows/ci.yml@v1")
+func TestParseReusableWorkflowRef_InvalidRef(t *testing.T) {
+	r, err := ParseReusableWorkflowRef("o/r/.github/workflows/ci.yml@v1")
 	require.NoError(t, err)
 	require.NotNil(t, r)
 
-	r, err = ParseReusableWorkflowRefStrict("o/r/.github/workflows/ci.yml@main~1")
+	r, err = ParseReusableWorkflowRef("o/r/.github/workflows/ci.yml@main~1")
 	assert.Nil(t, r)
 	assert.ErrorIs(t, err, ErrRefInvalidName)
 
-	r, err = ParseReusableWorkflowRefStrict("o/r@main~1")
+	r, err = ParseReusableWorkflowRef("o/r@main~1")
 	assert.Nil(t, r)
 	assert.NoError(t, err)
 }
@@ -437,13 +436,13 @@ func FuzzParsePin(f *testing.F) {
 	})
 }
 
-func FuzzParseActionRefStrict(f *testing.F) {
+func FuzzParseActionRef(f *testing.F) {
 	f.Add("actions/checkout@v4")
 	f.Add("actions/cache/save@v4")
 	f.Add("o/r/.github/workflows/ci.yml@main")
 	f.Add("a/b@main~1")
 	f.Fuzz(func(t *testing.T, s string) {
-		a, err := ParseActionRefStrict(s)
+		a, err := ParseActionRef(s)
 		if err != nil {
 			require.Nil(t, a)
 			return

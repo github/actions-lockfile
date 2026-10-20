@@ -44,7 +44,7 @@
           "pattern": "^(github\\.com|[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.ghe\\.com)$"
         },
         "ref": {
-          "description": "The short tag or branch name the commit was resolved from. Required: every dep that passes impostor checks has a resolvable ref. Must be a valid git ref name (git check-ref-format --allow-onelevel) without a refs/ prefix or leading '-', and never a commit SHA. When the pin key's ref is a tag or branch name, this must equal it exactly; when the pin key's ref is a full commit SHA, this records the tag or branch that SHA was found on. Consumers resolve it only by exact lookup of refs/tags/<ref> or refs/heads/<ref>. The CLI picks the best ref with priority: full semver tag > any tag > branch (protected > default > release/v* > any). The parser enforces the name rules; priority ordering is the CLI's concern.",
+          "description": "The short tag or branch name the commit was resolved from. Required: every dep that passes impostor checks has a resolvable ref. Must be a valid git ref name (git check-ref-format --allow-onelevel) without a refs/ prefix or leading '-', and never a commit SHA. When the pin key's ref is a tag or branch name, this must equal it exactly; when the pin key's ref is a full commit SHA, this records the tag or branch that SHA was found on. It is resolved only by exact lookup of refs/tags/<ref> or refs/heads/<ref>. The CLI picks the best ref with priority: full semver tag > any tag > branch (protected > default > release/v* > any). The parser enforces the name rules; priority ordering is the CLI's concern.",
           "type": "string",
           "minLength": 1,
           "pattern": "^[^\\x00-\\x20~^:?*\\[\\\\\\x7f/-]",
