@@ -239,10 +239,10 @@ workflows: {}
 	require.NoError(t, err)
 
 	withTag := f.Dependencies["actions/checkout@v6"]
-	assert.Equal(t, "v6", withTag.Ref)
+	assert.Equal(t, "v6", withTag.Ref.String())
 
 	branchRef := f.Dependencies["actions/internal@trunk"]
-	assert.Equal(t, "trunk", branchRef.Ref)
+	assert.Equal(t, "trunk", branchRef.Ref.String())
 }
 
 func mapKeys[V any](m map[string]V) []string {
@@ -551,7 +551,7 @@ func TestParse_FullSHARefCommitMismatchRejected(t *testing.T) {
 	input := `version: v0.0.2
 dependencies:
   actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683:
-    ref: 11bd71901bbe5b1630ceea73d27597364c9af683
+    ref: v4
     commit: sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     owner_id: 1
     repo_id: 1
@@ -567,7 +567,7 @@ func TestParse_FullSHARefCommitMatchAccepted(t *testing.T) {
 	input := `version: v0.0.2
 dependencies:
   actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683:
-    ref: 11bd71901bbe5b1630ceea73d27597364c9af683
+    ref: v4
     commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683
     owner_id: 1
     repo_id: 1
@@ -591,7 +591,7 @@ dependencies:
 }
 
 func TestParse_ColonInRefRejected(t *testing.T) {
-	// Colons in refs cause a pin key mismatch (pin key ref is "v4" but body ref is "v4:foo").
+	// Colons are not valid in git ref names.
 	input := `version: v0.0.2
 dependencies:
   actions/checkout@v4:
@@ -602,7 +602,7 @@ dependencies:
 `
 	_, err := Parse([]byte(input))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "does not match pin key ref")
+	assert.ErrorIs(t, err, ErrRefInvalidName)
 }
 
 func TestParse_LegacyDigestSuffixedKeyRejected(t *testing.T) {

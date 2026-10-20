@@ -92,6 +92,9 @@ func parseInternal(contents []byte, policy *VersionPolicy, paths []string) (File
 	// representation without changing the parsed YAML tree.
 	if f.Version == "v0.0.1" {
 		migrateV001Actions(&f)
+		if pe := rejectLegacyUnresolvedRefs(&f, paths); pe != nil {
+			return File{}, pe
+		}
 	}
 	if f.Version == "v0.0.1" || f.Version == "v0.0.2" {
 		migrateLegacyHostnames(&f)
@@ -298,18 +301,57 @@ func migrateV001Actions(f *File) {
 		if ref == "" {
 			// Fall back to extracting ref from the pin key.
 			if pin, ok := parsePinV001(pinKey.Value); ok {
-				ref = pin.Ref
+				if n, isName := pin.Ref.Name(); isName {
+					ref = n.String()
+				}
 			}
 		}
 
 		key := pinKey.Value
 		if a, ok := f.Dependencies[key]; ok {
-			if a.Ref == "" {
-				a.Ref = ref
-				f.Dependencies[key] = a
+			if a.Ref.IsZero() {
+				// A ref that is not a valid tag/branch name (for example a
+				// SHA-only legacy key) stays zero; rejectLegacyUnresolvedRefs
+				// reports it for in-scope entries.
+				if n, err := ParseRefName(ref); err == nil {
+					a.Ref = n
+					f.Dependencies[key] = a
+				}
 			}
 		}
 	}
+}
+
+// rejectLegacyUnresolvedRefs reports in-scope v0.0.1 entries whose migrated
+// ref is not a valid tag/branch name (e.g. a SHA-only key with no tag or
+// branch field). Such entries cannot satisfy the current entry-ref contract.
+func rejectLegacyUnresolvedRefs(f *File, paths []string) *ParseError {
+	root := docMapping(f.node)
+	if root == nil {
+		return nil
+	}
+	_, deps := mappingEntry(root, "dependencies")
+	if deps == nil || deps.Kind != yaml.MappingNode {
+		return nil
+	}
+	inScope := scopedDependencyPins(f, paths, "v0.0.1")
+	for i := 0; i+1 < len(deps.Content); i += 2 {
+		pinKey := deps.Content[i]
+		if inScope != nil {
+			if _, ok := inScope[canonicalPinForVersion(pinKey.Value, "v0.0.1")]; !ok {
+				continue
+			}
+		}
+		if a, ok := f.Dependencies[pinKey.Value]; ok && a.Ref.IsZero() {
+			return &ParseError{
+				Line:   pinKey.Line,
+				Column: pinKey.Column,
+				Msg:    fmt.Sprintf("dependency %q: %v", pinKey.Value, ErrRefNeedsRelock),
+				err:    ErrRefNeedsRelock,
+			}
+		}
+	}
+	return nil
 }
 
 // parsePinV001 parses a v0.0.1 pin key: "OWNER/REPO@REF:ALGO-HEX" or the
@@ -342,14 +384,15 @@ func parsePinV001(s string) (Pin, bool) {
 		}
 	}
 
-	if !isValidRef(ref) {
+	pinRef, err := ParsePinRef(ref)
+	if err != nil {
 		return Pin{}, false
 	}
 
 	return Pin{
 		Owner: owner,
 		Repo:  repo,
-		Ref:   ref,
+		Ref:   pinRef,
 	}.Canonical(), true
 }
 
@@ -504,7 +547,7 @@ func validateKnownFieldsVersioned(f *File, paths []string, version string) *Pars
 		}
 		// These checks only apply for v0.0.2+ (owner/repo@ref pin keys).
 		if version != "v0.0.1" {
-			if pe := rejectKeyRefMismatch(pinKey, action); pe != nil {
+			if pe := rejectInvalidEntryRef(pinKey, action); pe != nil {
 				return pe
 			}
 			if pe := rejectFullSHACommitMismatch(pinKey, action); pe != nil {

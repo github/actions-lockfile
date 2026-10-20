@@ -220,8 +220,11 @@ type Action struct {
 	// github.com on github.com. Producers set it only to github.com, for
 	// github.com-bound pins on a GHE.com data-residency instance.
 	Hostname string `yaml:"hostname,omitempty"`
-	// Ref is the git ref the commit was resolved from (required).
-	Ref string `yaml:"ref,omitempty"`
+	// Ref is the tag or branch name the commit was resolved from (required).
+	// It is never a commit SHA or a "refs/" name. Resolve it by exact lookup
+	// of Ref.TagRef() / Ref.BranchRef(). Zero for entries outside the paths
+	// passed to Parse whose recorded ref is absent or invalid.
+	Ref RefName `yaml:"ref,omitempty"`
 	// Commit is the digest in algo-prefixed form, e.g. "sha1-abc123..."
 	// (required).
 	Commit string `yaml:"commit,omitempty"`
@@ -450,10 +453,11 @@ func rejectZeroValues(action *yaml.Node, dep string) *ParseError {
 	return nil
 }
 
-// rejectKeyRefMismatch returns a ParseError when the dependency key parses as
-// a valid pin and the body's ref: field disagrees with the key's ref
-// component, signalling an inconsistent hand-edit.
-func rejectKeyRefMismatch(pinKey, action *yaml.Node) *ParseError {
+// rejectInvalidEntryRef returns a ParseError when the body's ref: field is
+// not a valid tag/branch name, or (for a name-keyed pin) differs from the
+// key's ref. A full-SHA key records the discovered tag/branch, which may
+// differ. Keys that fail ParsePin are reported by canonicalizeActions.
+func rejectInvalidEntryRef(pinKey, action *yaml.Node) *ParseError {
 	pin, ok := ParsePin(pinKey.Value)
 	if !ok {
 		return nil
@@ -461,16 +465,15 @@ func rejectKeyRefMismatch(pinKey, action *yaml.Node) *ParseError {
 	for j := 0; j+1 < len(action.Content); j += 2 {
 		key := action.Content[j]
 		val := action.Content[j+1]
-		if key.Value == "ref" && val.Value != "" && val.Value != pin.Ref {
-			// When the pin key ref is a full SHA, the body's ref is the
-			// discovered symbolic ref (tag/branch) — mismatch is expected.
-			if IsFullSha(pin.Ref) {
-				continue
-			}
+		if key.Value != "ref" {
+			continue
+		}
+		if _, err := ValidateEntryRef(pin.Ref, val.Value); err != nil {
 			return &ParseError{
 				Line:   val.Line,
 				Column: val.Column,
-				Msg:    fmt.Sprintf("action body ref %q does not match pin key ref %q for dependency %q", val.Value, pin.Ref, pinKey.Value),
+				Msg:    fmt.Sprintf("action body ref for dependency %q: %v", pinKey.Value, err),
+				err:    err,
 			}
 		}
 	}
@@ -485,7 +488,8 @@ func rejectFullSHACommitMismatch(pinKey, action *yaml.Node) *ParseError {
 	if !ok {
 		return nil
 	}
-	if !IsFullSha(pin.Ref) {
+	keyCommit, ok := pin.Ref.Commit()
+	if !ok {
 		return nil
 	}
 	for j := 0; j+1 < len(action.Content); j += 2 {
@@ -498,11 +502,11 @@ func rejectFullSHACommitMismatch(pinKey, action *yaml.Node) *ParseError {
 				return nil // malformed commit caught elsewhere
 			}
 			commitHex := strings.ToLower(val.Value[dashIdx+1:])
-			if strings.ToLower(pin.Ref) != commitHex {
+			if keyCommit.String() != commitHex {
 				return &ParseError{
 					Line:   val.Line,
 					Column: val.Column,
-					Msg:    fmt.Sprintf("pin key ref is a full SHA (%s) but commit digest %q does not match for dependency %q", ShortSHA(pin.Ref), val.Value, pinKey.Value),
+					Msg:    fmt.Sprintf("pin key ref is a full SHA (%s) but commit digest %q does not match for dependency %q", ShortSHA(keyCommit.String()), val.Value, pinKey.Value),
 				}
 			}
 		}

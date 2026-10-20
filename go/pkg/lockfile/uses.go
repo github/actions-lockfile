@@ -9,7 +9,7 @@ type ActionRef struct {
 	Owner string // e.g. "actions"
 	Repo  string // e.g. "checkout"
 	Path  string // e.g. "save" for actions/cache/save@v4
-	Ref   string // tag, branch, or full SHA as written after `@`
+	Ref   PinRef // tag/branch name or full SHA after `@`; see [ParsePinRef]
 	Raw   string // original `uses:` string (post-trim)
 }
 
@@ -34,17 +34,31 @@ func (a ActionRef) FullName() string {
 // ParseActionRef parses a `uses:` string into an ActionRef. It returns nil
 // for anything that is not a repository action — expression refs, local
 // paths, docker images, reusable workflow files, or any input whose
-// components are unsafe for the downstream URL/GraphQL builders.
+// components are unsafe for the downstream URL/GraphQL builders. It also
+// returns nil for a repository action whose ref fails [ParsePinRef]; use
+// [ParseActionRefStrict] to tell that case apart and fail closed.
 func ParseActionRef(uses string) *ActionRef {
-	parsed := splitUsesRef(uses)
+	a, _ := ParseActionRefStrict(uses)
+	return a
+}
+
+// ParseActionRefStrict is ParseActionRef with an error for the case
+// ParseActionRef folds into nil: the input has the shape of a repository
+// action but the text after `@` is not a valid ref (a *[RefError]). It
+// returns (nil, nil) for inputs that are not repository actions.
+func ParseActionRefStrict(uses string) (*ActionRef, error) {
+	parsed, err := splitUsesRef(uses)
 	if parsed == nil {
-		return nil
+		return nil, nil
 	}
 	// A YAML file under .github/workflows/ is never a repository action:
 	// the direct-child form is a reusable workflow, anything nested is
 	// malformed.
 	if isWorkflowFile(parsed.Path) {
-		return nil
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
 	}
 	return &ActionRef{
 		Owner: parsed.Owner,
@@ -52,7 +66,7 @@ func ParseActionRef(uses string) *ActionRef {
 		Path:  parsed.Path,
 		Ref:   parsed.Ref,
 		Raw:   parsed.Raw,
-	}
+	}, nil
 }
 
 // usesRef carries the components splitUsesRef extracts before classification.
@@ -62,62 +76,66 @@ type usesRef struct {
 	Owner string
 	Repo  string
 	Path  string
-	Ref   string
+	Ref   PinRef
 	Raw   string
 }
 
 // splitUsesRef performs the parse shared by ParseActionRef and
 // ParseReusableWorkflowRef: prefilter the input, split at the FIRST `@` (so a
 // ref containing `@`, e.g. a branch named "release@2024", stays intact), then
-// validate the ref and owner/repo[/path] segments. It does not classify the
-// result as action vs reusable workflow.
-func splitUsesRef(uses string) *usesRef {
+// validate the owner/repo[/path] segments and the ref. It does not classify
+// the result as action vs reusable workflow.
+//
+// It returns nil for inputs that are not repository references. When the
+// shape is valid but the ref fails ParsePinRef, it returns the shape (with a
+// zero Ref) and the *RefError so callers can fail closed.
+func splitUsesRef(uses string) (*usesRef, error) {
 	uses = strings.TrimSpace(uses)
 
 	if uses == "" || containsControlChars(uses) {
-		return nil
+		return nil, nil
 	}
 	if strings.HasPrefix(uses, "./") {
-		return nil
+		return nil, nil
 	}
 	if strings.HasPrefix(uses, "docker://") {
-		return nil
+		return nil, nil
 	}
 	if strings.Contains(uses, "${") {
-		return nil
+		return nil, nil
 	}
 
 	atParts := strings.SplitN(uses, "@", 2)
-	if len(atParts) != 2 || atParts[1] == "" {
-		return nil
-	}
-	ref := atParts[1]
-	if !isValidRef(ref) {
-		return nil
+	if len(atParts) != 2 {
+		return nil, nil
 	}
 
 	segments := strings.SplitN(atParts[0], "/", 3)
 	if len(segments) < 2 || segments[0] == "" || segments[1] == "" {
-		return nil
+		return nil, nil
 	}
 	if !isValidSegment(segments[0]) || !isValidSegment(segments[1]) {
-		return nil
+		return nil, nil
 	}
 
 	parsed := &usesRef{
 		Owner: segments[0],
 		Repo:  segments[1],
-		Ref:   ref,
 		Raw:   uses,
 	}
 	if len(segments) == 3 {
 		if !isValidPath(segments[2]) {
-			return nil
+			return nil, nil
 		}
 		parsed.Path = segments[2]
 	}
 
-	return parsed
+	pinRef, err := ParsePinRef(atParts[1])
+	if err != nil {
+		return parsed, err
+	}
+	parsed.Ref = pinRef
+	return parsed, nil
 }
 
 // ReusableWorkflowRef is a parsed `uses:` reference to a reusable workflow
@@ -130,7 +148,7 @@ type ReusableWorkflowRef struct {
 	Owner string // e.g. "octo"
 	Repo  string // e.g. "workflows"
 	Path  string // e.g. ".github/workflows/release.yml"
-	Ref   string // tag, branch, or full SHA as written after `@`
+	Ref   PinRef // tag/branch name or full SHA after `@`; see [ParsePinRef]
 	Raw   string // original `uses:` string (post-trim)
 }
 
@@ -154,14 +172,26 @@ func (r ReusableWorkflowRef) FullName() string {
 // returns nil for anything else, including local reusable workflows
 // (./.github/workflows/...) — use IsLocalReusableWorkflow for those — and
 // nested paths, since reusable workflows must live directly under
-// .github/workflows/.
+// .github/workflows/. It also returns nil when the ref fails [ParsePinRef];
+// use [ParseReusableWorkflowRefStrict] to fail closed on that case.
 func ParseReusableWorkflowRef(uses string) *ReusableWorkflowRef {
-	parsed := splitUsesRef(uses)
+	r, _ := ParseReusableWorkflowRefStrict(uses)
+	return r
+}
+
+// ParseReusableWorkflowRefStrict is ParseReusableWorkflowRef with a
+// *[RefError] when the input is a remote reusable workflow whose ref is
+// invalid. It returns (nil, nil) for any other shape.
+func ParseReusableWorkflowRefStrict(uses string) (*ReusableWorkflowRef, error) {
+	parsed, err := splitUsesRef(uses)
 	if parsed == nil {
-		return nil
+		return nil, nil
 	}
 	if !isReusableWorkflow(parsed.Path) {
-		return nil
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
 	}
 	return &ReusableWorkflowRef{
 		Owner: parsed.Owner,
@@ -169,7 +199,7 @@ func ParseReusableWorkflowRef(uses string) *ReusableWorkflowRef {
 		Path:  parsed.Path,
 		Ref:   parsed.Ref,
 		Raw:   parsed.Raw,
-	}
+	}, nil
 }
 
 // isValidSegment enforces the GitHub character set (alphanumerics, hyphens,
@@ -192,15 +222,6 @@ func isValidSegment(s string) bool {
 		}
 	}
 	return true
-}
-
-// isValidRef gates the ref (the part after @): non-empty and no colons (which
-// would be ambiguous with the legacy pin key separator).
-func isValidRef(ref string) bool {
-	if ref == "" {
-		return false
-	}
-	return !strings.Contains(ref, ":")
 }
 
 func containsControlChars(s string) bool {

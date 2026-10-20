@@ -62,7 +62,7 @@ func TestParseActionRef(t *testing.T) {
 			require.NotNil(t, got)
 			assert.Equal(t, tt.wantNWO, got.NWO())
 			assert.Equal(t, tt.wantPath, got.Path)
-			assert.Equal(t, tt.wantRef, got.Ref)
+			assert.Equal(t, tt.wantRef, got.Ref.String())
 		})
 	}
 }
@@ -118,13 +118,13 @@ func TestParseReusableWorkflowRef(t *testing.T) {
 			require.NotNil(t, got)
 			assert.Equal(t, tt.wantNWO, got.NWO())
 			assert.Equal(t, tt.wantPath, got.Path)
-			assert.Equal(t, tt.wantRef, got.Ref)
+			assert.Equal(t, tt.wantRef, got.Ref.String())
 		})
 	}
 }
 
 func TestReusableWorkflowRefNames(t *testing.T) {
-	r := ReusableWorkflowRef{Owner: "octo", Repo: "repo", Path: ".github/workflows/ci.yml", Ref: "v1"}
+	r := ReusableWorkflowRef{Owner: "octo", Repo: "repo", Path: ".github/workflows/ci.yml", Ref: mustPinRef(t, "v1")}
 	assert.Equal(t, "octo/repo", r.NWO())
 	assert.Equal(t, "octo/repo/.github/workflows/ci.yml", r.FullName())
 	assert.Equal(t, "", ReusableWorkflowRef{}.NWO())
