@@ -18,12 +18,12 @@ type Pin struct {
 	NWO   string // "actions/checkout"
 	Owner string // "actions"
 	Repo  string // "checkout"
-	Ref   string // "v4"
+	Ref   PinRef // "v4" or a full commit SHA; see [ParsePinRef]
 }
 
-// Canonical returns a copy of p with owner and repo lowercased. Ref preserves
-// source casing — git refs are case-sensitive. String, IndexKey, and ParsePin
-// all funnel through it.
+// Canonical returns a copy of p with owner and repo lowercased. Ref names
+// preserve source casing — git refs are case-sensitive; commit SHAs are always
+// lowercase. String, IndexKey, and ParsePin all funnel through it.
 func (p Pin) Canonical() Pin {
 	p.Owner = strings.ToLower(p.Owner)
 	p.Repo = strings.ToLower(p.Repo)
@@ -35,7 +35,7 @@ func (p Pin) Canonical() Pin {
 // This doubles as the actions-map key in the lockfile.
 func (p Pin) String() string {
 	c := p.Canonical()
-	return c.NWO + "@" + c.Ref
+	return c.NWO + "@" + c.Ref.String()
 }
 
 // IndexKey returns the normalized lookup key for this pin: "OWNER/REPO@REF".
@@ -46,15 +46,16 @@ func (p Pin) IndexKey() string {
 
 // IndexKey builds the normalized lookup key for a dependency entry:
 // "OWNER/REPO@REF".
-func IndexKey(owner, repo, ref string) string {
+func IndexKey(owner, repo string, ref PinRef) string {
 	return Pin{Owner: owner, Repo: repo, Ref: ref}.IndexKey()
 }
 
 // ParsePin parses a canonical pin string "OWNER/REPO@REF". It returns
 // ok=false when the "@" separator is missing or the repo portion carries a
 // sub-action path (e.g. "owner/repo/sub@ref"), which the repo-scoped grammar
-// rejects. On success owner and repo are lowercased; Ref preserves source
-// casing.
+// rejects, or when the ref fails [ParsePinRef]. On success owner and repo are
+// lowercased; a ref name preserves source casing and a commit SHA is
+// lowercased.
 func ParsePin(s string) (Pin, bool) {
 	atIdx := strings.IndexByte(s, '@')
 	if atIdx <= 0 || atIdx == len(s)-1 {
@@ -72,14 +73,15 @@ func ParsePin(s string) (Pin, bool) {
 		return Pin{}, false
 	}
 
-	if !isValidRef(ref) {
+	pinRef, err := ParsePinRef(ref)
+	if err != nil {
 		return Pin{}, false
 	}
 
 	return Pin{
 		Owner: owner,
 		Repo:  repo,
-		Ref:   ref,
+		Ref:   pinRef,
 	}.Canonical(), true
 }
 

@@ -114,6 +114,24 @@ A pin key is `OWNER/REPO@REF`. The same key appears in both `workflows` (as
 flat transitive lists) and `dependencies` (as deduplicated graph entries with
 `uses:` links to direct dependencies).
 
+The `REF` in a pin key is either a full commit SHA (40 or 64 hex digits,
+canonicalized to lowercase) or a short tag or branch name. A dependency's
+`ref` field is always a short tag or branch name:
+
+- It must be a valid git ref name (`git check-ref-format --allow-onelevel`),
+  so revision syntax such as `~`, `^`, `:`, `@{`, `..` and whitespace is
+  rejected. It must not start with `-` or `refs/` and must not be a commit SHA.
+- When the pin key's `REF` is a name, `ref` must equal it exactly (names are
+  case-sensitive). When the pin key's `REF` is a commit SHA, `ref` records the
+  tag or branch that commit was found on.
+- `ref` is resolved only by exact lookup of `refs/tags/<ref>` or
+  `refs/heads/<ref>`, never as a revision expression.
+
+The Go API exposes these as typed values (`PinRef`, `RefName`, `CommitID`)
+rather than strings. `ParseActionRef` and `ParseReusableWorkflowRef` return a
+`*RefError` for a `uses:` value whose ref is invalid; treat it as an error
+rather than skipping the value.
+
 The `hostname` field is optional in v0.0.3. An omitted `hostname` binds the
 pin to the home host: the tenant (`<tenant>.ghe.com`) on a GHE.com
 data-residency instance, or `github.com` on github.com.
@@ -135,7 +153,9 @@ hostname or a lowercase GHE tenant hostname such as `octocorp.ghe.com`.
 The parser also reads the dotcom-only v0.0.1 and v0.0.2 lockfiles, defaulting
 every dependency's `hostname` to `github.com` in memory. v0.0.1 `tag`/`branch`
 fields and `:algo-hex` suffixed pin keys are also normalized to the v0.0.3
-`File` struct. Parsing does not rewrite the source lockfile. Use
+`File` struct. A v0.0.1 entry with no valid tag or branch name to use as its
+`ref` (for example, a SHA-keyed entry with neither field) fails with
+`ErrRefNeedsRelock`; delete the entry and lock the dependency again. Parsing does not rewrite the source lockfile. Use
 `ParseWithPolicy` with a `VersionPolicy` to control which versions are accepted.
 
 ## Compatibility and stability
