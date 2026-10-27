@@ -34,12 +34,12 @@ dependencies:
 	// Pin keys are canonicalized to the v0.0.2 format (no :algo-hex suffix).
 	checkout := f.Dependencies["actions/checkout@v4"]
 	assert.Equal(t, "github.com", checkout.Hostname)
-	assert.Equal(t, "v4", checkout.Ref)
+	assert.Equal(t, "v4", checkout.Ref.String())
 	assert.Equal(t, "sha1-11bd71901bbe5b1630ceea73d27597364c9af683", checkout.Commit)
 
 	internal := f.Dependencies["actions/internal@trunk"]
 	assert.Equal(t, "github.com", internal.Hostname)
-	assert.Equal(t, "trunk", internal.Ref)
+	assert.Equal(t, "trunk", internal.Ref.String())
 }
 
 func TestParse_V002_HostnameDefaultsToDotcomWithoutMutatingInput(t *testing.T) {
@@ -90,7 +90,7 @@ dependencies:
 	require.NoError(t, err)
 
 	checkout := f.Dependencies["actions/checkout@v4"]
-	assert.Equal(t, "v4", checkout.Ref, "tag should win over branch in BestRef")
+	assert.Equal(t, "v4", checkout.Ref.String(), "tag should win over branch in BestRef")
 }
 
 func TestParse_V001_NoTagNoBranch_FallsBackToPinRef(t *testing.T) {
@@ -106,7 +106,7 @@ dependencies:
 	require.NoError(t, err)
 
 	checkout := f.Dependencies["actions/checkout@v4"]
-	assert.Equal(t, "v4", checkout.Ref, "ref should be extracted from pin key when tag/branch absent")
+	assert.Equal(t, "v4", checkout.Ref.String(), "ref should be extracted from pin key when tag/branch absent")
 }
 
 func TestParse_V001_LegacyPinKeysCanonicalizedToSimpleFormat(t *testing.T) {
@@ -239,7 +239,7 @@ dependencies:
 	require.NoError(t, err)
 	assert.Equal(t, Version, f.Version, "parsed file should be normalized to latest version")
 	assert.Equal(t, "github.com", f.Dependencies["actions/checkout@v4"].Hostname)
-	assert.Equal(t, "v4", f.Dependencies["actions/checkout@v4"].Ref)
+	assert.Equal(t, "v4", f.Dependencies["actions/checkout@v4"].Ref.String())
 }
 
 func TestParseWithPolicy_UnknownFutureVersion(t *testing.T) {
@@ -271,7 +271,7 @@ func TestParsePinV001(t *testing.T) {
 			pin, ok := parsePinV001(tc.input)
 			assert.Equal(t, tc.wantOK, ok)
 			if ok {
-				assert.Equal(t, tc.wantRef, pin.Ref)
+				assert.Equal(t, tc.wantRef, pin.Ref.String())
 			}
 		})
 	}

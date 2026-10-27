@@ -20,7 +20,7 @@ func TestParsePin(t *testing.T) {
 				NWO:   "actions/checkout",
 				Owner: "actions",
 				Repo:  "checkout",
-				Ref:   "v4",
+				Ref:   mustPinRef(t, "v4"),
 			},
 		},
 		{
@@ -30,7 +30,7 @@ func TestParsePin(t *testing.T) {
 				NWO:   "actions/checkout",
 				Owner: "actions",
 				Repo:  "checkout",
-				Ref:   "11bd71901bbe5b1630ceea73d27597364c9af683",
+				Ref:   mustPinRef(t, "11bd71901bbe5b1630ceea73d27597364c9af683"),
 			},
 		},
 		{
@@ -42,7 +42,7 @@ func TestParsePin(t *testing.T) {
 				NWO:   "actions/attest-build-provenance",
 				Owner: "actions",
 				Repo:  "attest-build-provenance",
-				Ref:   "predicate@1.1.4",
+				Ref:   mustPinRef(t, "predicate@1.1.4"),
 			},
 		},
 	}
@@ -71,6 +71,10 @@ func TestParsePin_Invalid(t *testing.T) {
 		{"deep sub-action path rejected", "owner/repo/a/b@v1"},
 		{"colon in ref rejected", "actions/checkout@v4:foo"},
 		{"colon only ref rejected", "actions/checkout@:"},
+		{"revision syntax rejected", "actions/checkout@main~1"},
+		{"reflog syntax rejected", "actions/checkout@main@{1}"},
+		{"qualified ref rejected", "actions/checkout@refs/tags/v4"},
+		{"space rejected", "actions/checkout@v4 x"},
 	}
 
 	for _, tt := range tests {
@@ -82,8 +86,17 @@ func TestParsePin_Invalid(t *testing.T) {
 	}
 }
 
+func TestParsePin_UppercaseSHALowercased(t *testing.T) {
+	got, ok := ParsePin("actions/checkout@11BD71901BBE5B1630CEEA73D27597364C9AF683")
+	require.True(t, ok)
+	c, isCommit := got.Ref.Commit()
+	require.True(t, isCommit)
+	assert.Equal(t, "11bd71901bbe5b1630ceea73d27597364c9af683", c.String())
+	assert.Equal(t, "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683", got.String())
+}
+
 func TestIndexKey(t *testing.T) {
-	assert.Equal(t, "actions/checkout@v4", IndexKey("actions", "checkout", "v4"))
+	assert.Equal(t, "actions/checkout@v4", IndexKey("actions", "checkout", mustPinRef(t, "v4")))
 }
 
 func TestPin_IndexKey(t *testing.T) {
@@ -94,12 +107,12 @@ func TestPin_IndexKey(t *testing.T) {
 	}{
 		{
 			name: "owner repo",
-			pin:  Pin{Owner: "actions", Repo: "checkout", Ref: "v4"},
+			pin:  Pin{Owner: "actions", Repo: "checkout", Ref: mustPinRef(t, "v4")},
 			want: "actions/checkout@v4",
 		},
 		{
 			name: "mixed case is lowercased",
-			pin:  Pin{Owner: "Actions", Repo: "Checkout", Ref: "v4"},
+			pin:  Pin{Owner: "Actions", Repo: "Checkout", Ref: mustPinRef(t, "v4")},
 			want: "actions/checkout@v4",
 		},
 		{
@@ -114,4 +127,11 @@ func TestPin_IndexKey(t *testing.T) {
 			assert.Equal(t, tt.want, tt.pin.IndexKey())
 		})
 	}
+}
+
+func mustPinRef(t testing.TB, s string) PinRef {
+	t.Helper()
+	r, err := ParsePinRef(s)
+	require.NoError(t, err)
+	return r
 }

@@ -47,22 +47,22 @@ func TestParseActionRef(t *testing.T) {
 		{name: "dotdot repo segment", input: "foo/..@v1", wantNil: true},
 		{name: "dot repo segment", input: "foo/.@v1", wantNil: true},
 		{name: "dot owner segment", input: "./repo@v1", wantNil: true},
-		// Refs are not validated beyond structural checks (colons for pin
-		// grammar).
+		// Invalid refs also return a *RefError; see TestParseActionRef_InvalidRef.
 		{name: "ref with colon rejected", input: "a/b@v1:foo", wantNil: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ParseActionRef(tt.input)
+			got, err := ParseActionRef(tt.input)
 			if tt.wantNil {
 				require.Nil(t, got)
 				return
 			}
+			require.NoError(t, err)
 			require.NotNil(t, got)
 			assert.Equal(t, tt.wantNWO, got.NWO())
 			assert.Equal(t, tt.wantPath, got.Path)
-			assert.Equal(t, tt.wantRef, got.Ref)
+			assert.Equal(t, tt.wantRef, got.Ref.String())
 		})
 	}
 }
@@ -110,21 +110,22 @@ func TestParseReusableWorkflowRef(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ParseReusableWorkflowRef(tt.input)
+			got, err := ParseReusableWorkflowRef(tt.input)
 			if tt.wantNil {
 				require.Nil(t, got)
 				return
 			}
+			require.NoError(t, err)
 			require.NotNil(t, got)
 			assert.Equal(t, tt.wantNWO, got.NWO())
 			assert.Equal(t, tt.wantPath, got.Path)
-			assert.Equal(t, tt.wantRef, got.Ref)
+			assert.Equal(t, tt.wantRef, got.Ref.String())
 		})
 	}
 }
 
 func TestReusableWorkflowRefNames(t *testing.T) {
-	r := ReusableWorkflowRef{Owner: "octo", Repo: "repo", Path: ".github/workflows/ci.yml", Ref: "v1"}
+	r := ReusableWorkflowRef{Owner: "octo", Repo: "repo", Path: ".github/workflows/ci.yml", Ref: mustPinRef(t, "v1")}
 	assert.Equal(t, "octo/repo", r.NWO())
 	assert.Equal(t, "octo/repo/.github/workflows/ci.yml", r.FullName())
 	assert.Equal(t, "", ReusableWorkflowRef{}.NWO())
@@ -196,8 +197,8 @@ func TestActionAndReusableParsersAreMutuallyExclusive(t *testing.T) {
 	}
 	for _, in := range inputs {
 		t.Run(in, func(t *testing.T) {
-			a := ParseActionRef(in)
-			r := ParseReusableWorkflowRef(in)
+			a, _ := ParseActionRef(in)
+			r, _ := ParseReusableWorkflowRef(in)
 			if a != nil && r != nil {
 				t.Fatalf("both parsers accepted %q (action=%+v reusable=%+v)", in, a, r)
 			}
